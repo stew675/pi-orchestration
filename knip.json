@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreDependencies": [
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-tui",
+    "@earendil-works/pi-ai",
+    "typebox"
+  ]
+}

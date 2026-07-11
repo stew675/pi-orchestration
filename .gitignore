@@ -1,0 +1,28 @@
+# Sensitive
+auth.json
+settings.json
+models.json
+presets.json
+orchestration-settings.json
+
+# Runtime / transient
+bin/*
+!bin/*.js
+sessions/
+
+# Orchestration runtime state (generated at runtime)
+.pi/orchestration/
+implementation-plan.md
+plan.json
+
+# Node modules
+node_modules/
+package-lock.json
+
+# OS noise
+.DS_Store
+*.swp
+*~
+confusion
+auto
+did-not-ask

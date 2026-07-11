@@ -1,0 +1,25 @@
+{
+  "name": "pi-orchestration",
+  "private": true,
+  "type": "module",
+  "prettier": {
+    "tabWidth": 4,
+    "useTabs": false,
+    "singleQuote": false,
+    "trailingComma": "none",
+    "printWidth": 120,
+    "semi": true
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "format": "prettier --write '*.ts'",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "prettier": "^3.9.4",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.4"
+  }
+}
