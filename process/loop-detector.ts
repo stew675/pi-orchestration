@@ -26,7 +26,7 @@ function sigMessageEnd(event: SubAgentEvent): string {
 function sigToolCall(event: SubAgentEvent): string {
     const tool = getEventToolName(event);
     const params = getEventParams(event);
-    // Use raw param values — no normalisation. This way reading different files
+    // Use raw param values - no normalisation. This way reading different files
     // (read(src/a.ts), read(src/b.ts)) produces distinct signatures and avoids
     // false positives. Genuine loops on the same file are still caught.
     return `call:${tool}(${Object.entries(params)
@@ -43,7 +43,7 @@ function signature(event: SubAgentEvent): string {
             return sigToolCall(event);
         case "tool_result":
         case "tool_execution_end":
-            return ""; // excluded — uniform ok/err signatures cause false positives on sequential reads
+            return ""; // excluded - uniform ok/err signatures cause false positives on sequential reads
         default:
             return ""; // ignore other event types
     }
@@ -94,7 +94,7 @@ function detectCycle(buf: string[]): LoopInfo | null {
         }
     }
 
-    // Buffer is growing — trim to keep memory bounded.
+    // Buffer is growing - trim to keep memory bounded.
     // Keep enough for the worst-case detection window plus a small margin.
     const maxKeep = MIN_BUFFER_SIZE * 3;
     if (buf.length > maxKeep) {
@@ -117,7 +117,7 @@ export interface LoopDetectorOptions {
 }
 
 /**
- * Stateful loop detector — feed parsed sub-agent events to it via `ingest()`.
+ * Stateful loop detector - feed parsed sub-agent events to it via `ingest()`.
  * After detecting a repetitive cycle (≥5 repetitions of 1–3 events), fires the callback once.
  */
 export class LoopDetector {
@@ -147,7 +147,7 @@ export class LoopDetector {
 }
 
 // ---------------------------------------------------------------------------
-// Orchestrator-level loop detection — watches the orchestrator's own turn
+// Orchestrator-level loop detection - watches the orchestrator's own turn
 // patterns during execution mode. Unlike LoopDetector above (which tracks raw
 // sub-agent event streams), this tracks per-turn tool-call signatures and
 // detects repeated consecutive turns.
@@ -163,7 +163,7 @@ function _orchToolSignature(toolName: string, args: Record<string, unknown>): st
     if (args.mode) keyParams.push(`mode=${args.mode}`);
 
     // Include distinguishing parameters for exploration tools so that reading
-    // different files produces distinct signatures — prevents false-positive loop
+    // different files produces distinct signatures - prevents false-positive loop
     // detection when the orchestrator sequentially reads multiple source files.
     switch (toolName) {
         case "read":
@@ -211,7 +211,7 @@ class OrchestratorLoopDetector {
     /**
      * Track whether we've moved past the initial "task assignment" phase.
      * During task assignment, the orchestrator fires many orchestrate_add_task calls
-     * that all produce identical signatures — loop detection must be skipped here.
+     * that all produce identical signatures - loop detection must be skipped here.
      * Set to true when orchestrate_start_task is first called (sub-agent execution begins).
      */
     private _pastTaskAssignmentPhase = false;
@@ -235,7 +235,7 @@ class OrchestratorLoopDetector {
         for (const exec of this._pendingToolExecutions.values()) {
             parts.push(_orchToolSignature(exec.toolName, exec.args));
         }
-        // Sort is intentional — tool executions may fire in any order within a turn.
+        // Sort is intentional - tool executions may fire in any order within a turn.
         parts.sort();
         return `turn:${parts.join("|")}`;
     }
@@ -280,7 +280,7 @@ class OrchestratorLoopDetector {
         this._loopBreakerFired = false;
     }
 
-    /** Signal that orchestrate_start_task was called — loop detection can now activate. */
+    /** Signal that orchestrate_start_task was called - loop detection can now activate. */
     signalTaskStarted(): void {
         this._pastTaskAssignmentPhase = true;
     }

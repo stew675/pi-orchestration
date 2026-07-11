@@ -7,6 +7,7 @@ import {
     setSummarizationConcurrency,
     setParallelTasks,
     setTimeoutMs,
+    setSubAgentMaxTurns,
     setBooleanSetting
 } from "../core";
 import { persistSettings, resetToDefaults } from "./settings";
@@ -42,8 +43,8 @@ const MODEL_SCOPES: Record<
  * Open the orchestration settings overlay.
  *
  * Presents a menu of configurable options:
- *   - Orchestration model (opens model picker) — main model used during orchestration
- *   - Planning model (opens model picker) — model used while building/editing plans
+ *   - Orchestration model (opens model picker) - main model used during orchestration
+ *   - Planning model (opens model picker) - model used while building/editing plans
  *   - Task model (opens model picker)
  *   - Validator model (opens model picker)
  *   - Summarization concurrency (number input)
@@ -66,6 +67,8 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 `  Task timeout:          ${formatTimeout(OrchestratorState.taskTimeoutMs)}\n` +
                 `  Validator timeout:     ${formatTimeout(OrchestratorState.validatorTimeoutMs)}\n` +
                 `  Task summary timeout:  ${formatTimeout(OrchestratorState.taskSummaryTimeoutMs)}\n` +
+                `  Sub-agent idle timeout:${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)}\n` +
+                `  Sub-agent max turns:   ${OrchestratorState.subAgentMaxTurns}\n` +
                 `  Allow stop tool:       ${OrchestratorState.allowStopTool ? "enabled" : "disabled"}\n` +
                 `  Validate simple tasks: ${OrchestratorState.validateSimpleTasks ? "enabled" : "disabled"}\n` +
                 `  Validate complex tasks: ${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"}\n\n` +
@@ -82,7 +85,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         return;
     }
 
-    // Build the menu items — labels with current values shown in parens.
+    // Build the menu items - labels with current values shown in parens.
     function buildItems(): SelectItem[] {
         const orchStr = formatModel(OrchestratorState.orchestrationModel);
         const planStr = formatModel(OrchestratorState.planningModel);
@@ -96,6 +99,10 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         const taskTimeoutStr = formatTimeout(OrchestratorState.taskTimeoutMs);
         const validatorTimeoutStr = formatTimeout(OrchestratorState.validatorTimeoutMs);
         const taskSummaryTimeoutStr = formatTimeout(OrchestratorState.taskSummaryTimeoutMs);
+        const subAgentIdleTimeoutStr = formatTimeout(OrchestratorState.subAgentIdleTimeoutMs);
+        const subAgentMaxTurnsStr = OrchestratorState.subAgentMaxTurns === 0
+            ? "unlimited"
+            : OrchestratorState.subAgentMaxTurns.toString();
         const stopToolStr = OrchestratorState.allowStopTool ? "enabled" : "disabled";
         const validateSimpleStr = OrchestratorState.validateSimpleTasks ? "enabled" : "disabled";
         const validateComplexStr = OrchestratorState.validateComplexTasks ? "enabled" : "disabled";
@@ -112,6 +119,8 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
             { value: "timeout-task", label: `Task timeout (${taskTimeoutStr})` },
             { value: "timeout-validator", label: `Validator timeout (${validatorTimeoutStr})` },
             { value: "timeout-task-summary", label: `Task summary timeout (${taskSummaryTimeoutStr})` },
+            { value: "timeout-sub-agent-idle", label: `Sub-agent idle timeout (${subAgentIdleTimeoutStr})` },
+            { value: "max-turns", label: `Sub-agent max turns (${subAgentMaxTurnsStr})` },
             { value: "allow-stop-tool", label: `Allow orchestrate_stop (${stopToolStr})` },
             { value: "validate-simple-tasks", label: `Validate simple tasks (${validateSimpleStr})` },
             { value: "validate-complex-tasks", label: `Validate complex tasks (${validateComplexStr})` },
@@ -191,6 +200,13 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         "timeout-task": () => handleTimeoutInput(ctx, "task", OrchestratorState.taskTimeoutMs),
         "timeout-validator": () => handleTimeoutInput(ctx, "validator", OrchestratorState.validatorTimeoutMs),
         "timeout-task-summary": () => handleTimeoutInput(ctx, "taskSummary", OrchestratorState.taskSummaryTimeoutMs),
+        "timeout-sub-agent-idle": () => handleSubAgentIdleTimeoutInput(ctx),
+        "max-turns": async () => {
+            await handleNumberInput(ctx, "Sub-agent max turns", OrchestratorState.subAgentMaxTurns, 0, (val) => {
+                setSubAgentMaxTurns(val);
+                persistSettings(OrchestratorState);
+            });
+        },
         "allow-stop-tool": async () => {
             toggleBooleanSetting(
                 ctx,
@@ -239,7 +255,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
     // Show the menu; loop so that after a sub-handler finishes we re-show it.
     while (true) {
         const choice = await showMenu();
-        if (!choice) return; // escape — done
+        if (!choice) return; // escape - done
         const handler = choiceHandlers[choice];
         if (handler) await handler();
     }
@@ -301,7 +317,7 @@ async function handleModelSelection(
                         const targetModel = ctx.modelRegistry.find(liveModel.provider, liveModel.id);
                         if (!targetModel) {
                             ctx.ui.notify(
-                                `${label} set to ${selected.provider}/${selected.id}. (Not found in registry — will apply next session.)`,
+                                `${label} set to ${selected.provider}/${selected.id}. (Not found in registry - will apply next session.)`,
                                 "warning"
                             );
                             return;
@@ -309,7 +325,7 @@ async function handleModelSelection(
                         const success = await pi.setModel(targetModel);
                         if (!success) {
                             ctx.ui.notify(
-                                `Cannot switch to ${label.toLowerCase()} ${liveModel.provider}/${liveModel.id} — no configured API key.`,
+                                `Cannot switch to ${label.toLowerCase()} ${liveModel.provider}/${liveModel.id} - no configured API key.`,
                                 "warning"
                             );
                             return;
@@ -478,7 +494,7 @@ async function handleTimeoutInput(
     }
 }
 
-/** Format for the input field default — compact form. */
+/** Format for the input field default - compact form. */
 function formatTimeoutShort(ms: number): string {
     if (ms === 0) return "0";
     const totalSeconds = Math.floor(ms / 1_000);
@@ -498,5 +514,40 @@ function getTimeoutLabel(scope: "task" | "validator" | "taskSummary"): string {
             return "Validator timeout";
         case "taskSummary":
             return "Task summary timeout";
+    }
+}
+
+/**
+ * Open a text input dialog for editing the global sub-agent idle timeout.
+ */
+async function handleSubAgentIdleTimeoutInput(ctx: ExtensionContext): Promise<void> {
+    if (ctx.mode !== "tui") {
+        ctx.ui.notify(
+            `Set idle timeout via: /om-settings sub-agent-idle <time>\n` +
+                `  e.g. "/om-settings sub-agent-idle 5m30s"`,
+            "info"
+        );
+        return;
+    }
+
+    const currentStr = formatTimeout(OrchestratorState.subAgentIdleTimeoutMs);
+
+    const result = await showTextInputDialog(
+        ctx,
+        "Sub-agent idle timeout",
+        `Current: ${currentStr}`,
+        ['Formats: "30s" | "5m" | "2m30s" | "0" (no limit)\n'],
+        OrchestratorState.subAgentIdleTimeoutMs === 0 ? "0" : formatTimeoutShort(OrchestratorState.subAgentIdleTimeoutMs)
+    );
+
+    if (result === null || result.trim() === "") return; // cancelled or empty
+
+    try {
+        const ms = parseTimeout(result);
+        setTimeoutMs("subAgentIdleTimeoutMs", ms);
+        persistSettings(OrchestratorState);
+        ctx.ui.notify(`Sub-agent idle timeout set to ${formatTimeout(ms)}.`, "info");
+    } catch (err) {
+        ctx.ui.notify(`Invalid timeout: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
 }

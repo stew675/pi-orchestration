@@ -74,7 +74,7 @@ describe("detectCycle", () => {
     it("returns null for independent tasks with no edges forming a cycle", () => {
         const plan = makePlan([
             { id: "X" },
-            { id: "Y", dependencies: ["Z"] } // Z doesn't exist in task list — adjacency lookup returns undefined → no edge
+            { id: "Y", dependencies: ["Z"] } // Z doesn't exist in task list - adjacency lookup returns undefined → no edge
         ]);
         expect(detectCycle(plan)).toBeNull();
     });

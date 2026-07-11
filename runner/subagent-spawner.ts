@@ -65,7 +65,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
         const loopDetector = new LoopDetector({
             onLoopDetected: (info) => {
                 console.warn(
-                    `[sub-agent ${options.taskId}] Loop detected — cycle of ${info.cycleLen} event(s), ${info.cycles} repetitions. Killing process.`
+                    `[sub-agent ${options.taskId}] Loop detected - cycle of ${info.cycleLen} event(s), ${info.cycles} repetitions. Killing process.`
                 );
                 loopKilled = true;
                 if (!child.killed) child.kill("SIGTERM");
@@ -85,7 +85,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
                     taskId: options.taskId
                 },
                 (line) => {
-                    // Feed every raw line to the monitor for /om-watch
+                    // Feed every raw line to the monitor for /om-status
                     monitor.ingestLine(options.taskId, line);
 
                     const event = tryParseSubAgentEvent(line);
@@ -136,7 +136,9 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
         }
 
         // Wire the process-manager's capture buffer into monitor so both
-        // /om-watch and failure diagnostics read from a single source of truth.
+        // /om-status and failure diagnostics read from a single source of truth.
+        const taggedId = `implementation-${options.taskId}`;
+        monitor.registerAgent(taggedId, child);
         monitor.setCurrentTask(options.taskId, `sub-agent ${options.taskId}`, capturedLines);
         monitor.clearEvents(options.taskId);
 

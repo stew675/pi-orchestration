@@ -2,7 +2,7 @@ import { Container, type Focusable, Input, Text } from "@earendil-works/pi-tui";
 import { matchesKey, Key, truncateToWidth } from "@earendil-works/pi-tui";
 
 // ---------------------------------------------------------------------------
-// AcceptOrEditDialog — hybrid selection + text input overlay.
+// AcceptOrEditDialog - hybrid selection + text input overlay.
 //
 // Renders two options:
 //   [1] ✓ Accept (highlighted by default)
@@ -53,7 +53,7 @@ export class AcceptOrEditDialog extends Container implements Focusable {
             if (value.length > 0 && this.onDone) {
                 this.onDone({ feedback: value });
             } else if (!value.length && this.onDone) {
-                // Empty submit in edit mode — treat as accept with no changes
+                // Empty submit in edit mode - treat as accept with no changes
                 this.onDone({ accepted: true });
             }
         };
@@ -68,7 +68,7 @@ export class AcceptOrEditDialog extends Container implements Focusable {
         this.addChild(new Text("", 0, 0)); // placeholder, rebuilt on render
     }
 
-    /** Focusable interface — propagate to input child for IME cursor positioning. */
+    /** Focusable interface - propagate to input child for IME cursor positioning. */
     get focused(): boolean {
         return this._focused;
     }
@@ -108,10 +108,10 @@ export class AcceptOrEditDialog extends Container implements Focusable {
                 this.selectedIndex--;
             } else if (matchesKey(data, Key.enter)) {
                 if (this.selectedIndex === 0) {
-                    // Option 1 — Accept
+                    // Option 1 - Accept
                     if (this.onDone) this.onDone({ accepted: true });
                 } else if (this.selectedIndex === 1) {
-                    // Option 2 selected via Enter — switch to edit mode
+                    // Option 2 selected via Enter - switch to edit mode
                     this.enterEditMode();
                 }
             }
@@ -123,16 +123,16 @@ export class AcceptOrEditDialog extends Container implements Focusable {
         const lines: string[] = [];
 
         if (this.mode === "list") {
-            // Option 1 — Accept
+            // Option 1 - Accept
             const acceptLine = this.selectedIndex === 0 ? "> ✓ Accept" : "  ✓ Accept";
             lines.push(this.fg("success", truncateToWidth(acceptLine, width)));
 
-            // Option 2 — Type changes
+            // Option 2 - Type changes
             const editLabel =
                 this.selectedIndex === 1 ? "> ✎ Type your changes here..." : "  ✎ Type your changes here...";
             lines.push(this.fg("dim", truncateToWidth(editLabel, width)));
         } else {
-            // Edit mode — show the two options dimmed + active input line
+            // Edit mode - show the two options dimmed + active input line
             lines.push(this.fg("success", "  ✓ Accept"));
             lines.push(this.fg("accent", "> ✎ Type your changes here..."));
 

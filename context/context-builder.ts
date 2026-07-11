@@ -66,11 +66,11 @@ export function buildValidatorContext(
     const context: string[] = [];
     context.push("You are the Validator. Evaluate if a task was completed successfully.");
 
-    // Task description — this is all the goal context needed
+    // Task description - this is all the goal context needed
     context.push("\n## Task to Validate");
     appendJsonDataBlock(context, { task_description: taskDescription });
 
-    // Artifact files — names only (validator has read access if needed)
+    // Artifact files - names only (validator has read access if needed)
     const allArtifacts = [...artifactFiles];
     if (transcriptLogFile) {
         allArtifacts.push(transcriptLogFile);
@@ -89,7 +89,7 @@ export function buildValidatorContext(
         context.push("");
     }
 
-    // Session transcript — extracted from log file, thinking deltas stripped.
+    // Session transcript - extracted from log file, thinking deltas stripped.
     if (sessionTranscript && sessionTranscript.trim()) {
         const hasTruncationMarker = sessionTranscript.includes("truncated");
         context.push("## Sub-Agent Session Transcript");
@@ -97,13 +97,13 @@ export function buildValidatorContext(
         if (hasTruncationMarker) {
             context.push(
                 "**NOTE: This transcript was truncated.** The captured output does not show the full session. " +
-                    `Read the log file listed above ending in .log for the complete unedited transcript, and use your \`read\` tool to verify artifact files directly — do not rely solely on this partial summary.\n`
+                    `Read the log file listed above ending in .log for the complete unedited transcript, and use your \`read\` tool to verify artifact files directly - do not rely solely on this partial summary.\n`
             );
         }
-        // Readable extraction — no code fence needed, it's plain text.
+        // Readable extraction - no code fence needed, it's plain text.
         context.push(sessionTranscript);
     } else {
-        // No transcript available — validator must read files
+        // No transcript available - validator must read files
         context.push("## Sub-Agent Session Transcript");
         context.push(
             "No session transcript was captured. You MUST use your `read` tool to inspect the artifact files directly to verify correctness.\n"
@@ -114,16 +114,16 @@ export function buildValidatorContext(
     context.push("\n---\n");
     context.push(
         "Do not write code or modify any files. Inspect the session transcript above and verify artifact files directly with your `read` tool to determine if the task was completed successfully. " +
-            "The transcript only shows a summary of tool calls — it does NOT contain file contents. If you cannot confirm correctness from the transcript alone, use `read` on the listed artifact files before passing or failing the task."
+            "The transcript only shows a summary of tool calls - it does NOT contain file contents. If you cannot confirm correctness from the transcript alone, use `read` on the listed artifact files before passing or failing the task."
     );
     context.push("");
     context.push("## Verdict");
-    context.push("You have two tools available — call exactly one and then stop:");
+    context.push("You have two tools available - call exactly one and then stop:");
     context.push(
         "- `orchestrate_validate_pass`: Call this if the task was completed successfully. All expected files exist, compile/run correctly, and match the task description."
     );
     context.push(
-        "- `orchestrate_validate_fail`: Call this if the task was NOT completed — missing files, compilation errors, tests failing, or output not matching the requirements."
+        "- `orchestrate_validate_fail`: Call this if the task was NOT completed - missing files, compilation errors, tests failing, or output not matching the requirements."
     );
     context.push("");
     context.push(
@@ -208,7 +208,7 @@ function appendImplementationPlanReference(lines: string[], _plan: Orchestration
 
     // Try to extract only the relevant sections for this task
     const relevantSections = extractRelevantPlanSections(implPlan, task);
-    if (!relevantSections) return; // nothing matched — skip injection entirely
+    if (!relevantSections) return; // nothing matched - skip injection entirely
 
     lines.push("## Reference Implementation Plan");
     lines.push(
@@ -223,7 +223,7 @@ function appendImplementationPlanReference(lines: string[], _plan: Orchestration
     );
     lines.push(
         "IMPORTANT: All file paths in the plan are relative to the current working directory. " +
-            "Create files at exactly the paths specified — do not add an extra top-level directory prefix " +
+            "Create files at exactly the paths specified - do not add an extra top-level directory prefix " +
             "unless the plan explicitly names one as part of the path.\n"
     );
 }
@@ -305,7 +305,7 @@ function appendTaskGuidelines(lines: string[]): void {
     lines.push("## Important Guidelines\n");
     lines.push("- **Stay within scope**: Only create/modify what your task description asks for.");
     lines.push(
-        "  If the implementation plan (above) specifies particular files or APIs, follow it exactly — do not invent additional ones."
+        "  If the implementation plan (above) specifies particular files or APIs, follow it exactly - do not invent additional ones."
     );
     lines.push(
         "- **Respect the current working directory**: All file paths are relative to the CWD. " +

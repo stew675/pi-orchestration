@@ -13,9 +13,9 @@ const RECOVERY_STRATEGIES: Array<{
         keywords: [/truncated/, /partial summary/],
         message:
             "\nRecovery strategy: The validator could not verify the sub-agent's output. " +
-            "Do NOT audit source files or re-read code — this wastes turns and doesn't fix the problem. " +
+            "Do NOT audit source files or re-read code - this wastes turns and doesn't fix the problem. " +
             "Instead, delete the failed task and recreate it with explicit instructions to write test results or build logs to a file (e.g., test_results.txt). " +
-            "The validator can only inspect files — stdout claims are insufficient for verification. " +
+            "The validator can only inspect files - stdout claims are insufficient for verification. " +
             "If you've already retried this task more than once, consider using orchestrate_complete_task after personally verifying the work via read."
     },
     {

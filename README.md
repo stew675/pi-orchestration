@@ -39,7 +39,9 @@ ln -s ~/src/pi-orchestration ~/.pi/agent/extensions/orchestration
 - **Infinite loop protection**: Tasks auto-fail after exceeding 5 clarification attempts (i.e., on the 6th request)
 - **Sub-Agent Loop detection**: A cycle detector extracts signatures from sub-agents and kills the sub-agent process if a model loop is detected
 - **Orchestrator Loop detection**: A cycle detector monitors the main orchestration model and will inject prompts to attempt to break it out of a looping pattern
-- **Live Sub-Agent monitoring**: `/om-status` includes a real-time stream of the current task's sub-agent output events
+- **Live Sub-Agent monitoring**: `/om-status` includes a real-time stream of the current task's sub-agent output events. Validators and summarizers feed into the monitor for JSON parsing but do not hijack the active view (`skipActive: true`)
+- **Sub-agent idle timeout**: Global watchdog kills any sub-agent with no JSON stream activity for a configurable period (default 5m30s, set via `/om-settings`). Prevents stalled agents that consume resources without progress
+- **Sub-agent max turns**: Global watchdog kills any sub-agent exceeding a maximum model turn count (default 30, set via `/om-settings`). Prevents runaway agents stuck in inefficient loops
 - **Parallel execution**: Configurable number of simultaneous tasks via `/om-settings` (`parallelTasks`, default 1)
 - **Graceful recovery**: Resume from any state (paused, failed, reviewing) without losing progress
 - **Watchdog timers**: Each sub-agent phase has an independent timeout; exceeded tasks are killed via SIGTERM → SIGKILL escalation
@@ -73,6 +75,8 @@ ln -s ~/src/pi-orchestration ~/.pi/agent/extensions/orchestration
 | `allow orchestrator stop` | Allows orchestrator to stop on severe issues |
 | `Validate Simple Tasks` | Whether to use validation on simple tasks |
 | `Validate Complex Tasks` | Whether to use validation on complex tasks |
+| `Sub-agent idle timeout` | Kill any sub-agent with no JSON activity for this period (default 5m30s; 0 = disabled) |
+| `Sub-agent max turns` | Kill any sub-agent exceeding this model turn count (default 30; 0 = unlimited) |
 | `Reset Defaults` | Reset settings to default |
 
 
@@ -162,7 +166,7 @@ When a task completes, its prompt file is moved from `tasks/` to `archive/` alon
   - The detector extracts signatures from `message_end` and `tool_call` events using raw parameter values (no normalisation). `tool_result` events are excluded to prevent false positives on sequential reads.
   - If a cycle of 1–3 events repeats ≥5 times, the process is killed with SIGTERM and the task marked `failed`
 ### Live Sub-Agent Monitoring
-`/om-status` streams the current task's sub-agent output in real time. The monitor displays a "model-only" view — assistant text without tool-call/result noise — while maintaining undelayed responsiveness via streaming event refresh triggers.
+`/om-status` streams the current task's sub-agent output in real time. The monitor displays a "model-only" view - assistant text without tool-call/result noise - while maintaining undelayed responsiveness via streaming event refresh triggers.
 - The orchestration can be paused and return to the Task Building Phase at any time to take corrective actions or to modify the live plan
 
 ### Task Validation (Complex and Read-Only Tasks)
@@ -210,6 +214,8 @@ All sub-agent watchdog timeouts are configurable via `/om-settings` (TUI) or by 
 | Task timeout | 12m | Main implementation sub-agents; per-task `timeoutMs` in plan overrides this |
 | Validator timeout | 4m | Read-only validation agents for complex tasks |
 | Task summary timeout | 2m | Per-task API surface summaries injected into dependent tasks |
+| Sub-agent idle timeout | 5m30s | Kill any sub-agent with no JSON stream activity (global, all types) |
+| Sub-agent max turns | 30 | Kill any sub-agent exceeding this model turn count (global, all types) |
 
 Time formats: `30s`, `1m20s`, `15m`, or `0` (no timeout). Settings use a two-tier resolution: project-local `.pi/orchestration/settings.json` is checked first, then falls back to global `~/.pi/agent/orchestration-settings.json`. Project-local takes full precedence when present. Sub-agent processes use SIGTERM → SIGKILL escalation for timeout enforcement.
 

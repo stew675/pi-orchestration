@@ -36,7 +36,7 @@ async function enterOrchestrationMode(pi: ExtensionAPI, ctx: ExtensionContext) {
         const switched = await switchToOrchestrationModel(pi, ctx);
         if (!switched) {
             ctx.ui.notify(
-                `Orchestration model ${OrchestratorState.orchestrationModel.provider}/${OrchestratorState.orchestrationModel.id} unavailable — using current model instead.`,
+                `Orchestration model ${OrchestratorState.orchestrationModel.provider}/${OrchestratorState.orchestrationModel.id} unavailable - using current model instead.`,
                 "warning"
             );
         } else {
@@ -54,7 +54,7 @@ async function enterOrchestrationMode(pi: ExtensionAPI, ctx: ExtensionContext) {
 async function exitOrchestration(pi: ExtensionAPI, ctx: ExtensionContext) {
     killAllProcesses("SIGKILL");
 
-    // Plan is intentionally NOT cleared — incomplete plans on disk
+    // Plan is intentionally NOT cleared - incomplete plans on disk
     // are preserved so they can be resumed later via /om-enable.
     setOrchestrationMode(false, false, false, pi, refreshBorder);
     requestSystemPromptRestore();
@@ -67,7 +67,7 @@ async function exitOrchestration(pi: ExtensionAPI, ctx: ExtensionContext) {
         // Still defined → restore failed (auth issue or not found)
         const orig = OrchestratorState.originalMainModel;
         ctx.ui.notify(
-            `Cannot restore original model ${orig.provider}/${orig.id} — staying on current model.`,
+            `Cannot restore original model ${orig.provider}/${orig.id} - staying on current model.`,
             "warning"
         );
     }
@@ -154,7 +154,7 @@ function handleResumeFailed(plan: OrchestrationPlan, pi: ExtensionAPI) {
  *
  * Sends a follow-up user message so the orchestrator wakes up after its current turn
  * completes (if any). This avoids the race that occurs when sending a user message and
- * spawning the Runner simultaneously — both would try to send messages to the agent at
+ * spawning the Runner simultaneously - both would try to send messages to the agent at
  * the same time. By using deliverAs: "followUp" we let the orchestrator drive execution
  * through its normal tool flow (orchestrate_start_task → Runner), which is inherently
  * safe and idempotent.
@@ -242,7 +242,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
 
         resumePlanExecution(plan, pi);
     } else {
-        // Discard — clear everything and start fresh
+        // Discard - clear everything and start fresh
         StateManager.clearPlan();
         await enterPlanningWithCleanContext(pi, ctx);
         ctx.ui.notify("Previous plan discarded. Orchestration enabled in planning mode with a clean context.", "info");
@@ -333,7 +333,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
                 return;
             }
 
-            // No incomplete plan — check for a previous implementation-plan.md on disk.
+            // No incomplete plan - check for a previous implementation-plan.md on disk.
             // This covers two scenarios:
             // 1. plan.json is "completed" (full cycle finished) + implementation-plan.md exists
             // 2. No plan.json at all + orphaned implementation-plan.md from a prior session
@@ -345,7 +345,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
                 return;
             }
 
-            // Clean slate — no existing plans on disk
+            // Clean slate - no existing plans on disk
             await handleFreshStart(plan, pi, ctx);
         }
     });
@@ -381,7 +381,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     const implPlan = StateManager.loadImplementationPlan();
     if (!implPlan || !implPlan.trim()) {
         ctx.ui.notify(
-            "Cannot start execution — the implementation plan is empty. Please create a plan with the agent first.",
+            "Cannot start execution - the implementation plan is empty. Please create a plan with the agent first.",
             "error"
         );
         return;
@@ -391,7 +391,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     Runner.resetSummarizer();
 
     // Immediate feedback so the user knows their input was received
-    ctx.ui.notify("Plan approved — starting orchestration execution…", "info");
+    ctx.ui.notify("Plan approved - starting orchestration execution…", "info");
 
     // Exit planning mode (restore pre-planning model if one was captured)
     await exitPlanningMode(pi, ctx);
@@ -413,7 +413,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         pi.sendMessage(
             {
                 customType: "orchestrator_event",
-                content: `System: Execution approved — the approved implementation plan is provided below. Proceed with orchestration.${planPayload}`,
+                content: `System: Execution approved - the approved implementation plan is provided below. Proceed with orchestration.${planPayload}`,
                 display: false
             },
             { triggerTurn: true }
@@ -434,7 +434,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         pi.sendMessage(
             {
                 customType: "orchestrator_event",
-                content: `System: Execution approved — the approved implementation plan is provided below. Build tasks from it using orchestrate_add_task, then use orchestrate_start_task to begin execution.${planPayload}`,
+                content: `System: Execution approved - the approved implementation plan is provided below. Build tasks from it using orchestrate_add_task, then use orchestrate_start_task to begin execution.${planPayload}`,
                 display: false
             },
             { triggerTurn: true }
@@ -494,7 +494,7 @@ export async function showAcceptOrEditDialog(pi: ExtensionAPI, ctx: ExtensionCon
             { triggerTurn: true }
         );
     }
-    // cancelled — just dismiss, user gets back to normal command line
+    // cancelled - just dismiss, user gets back to normal command line
 }
 
 /**
@@ -556,7 +556,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 );
 
                 if (!choice) {
-                    // Discard — clear everything and start fresh
+                    // Discard - clear everything and start fresh
                     StateManager.clearPlan();
                 }
             }
@@ -584,7 +584,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 plan.status = "pausing";
                 StateManager.savePlan(plan);
                 ctx.ui.notify(
-                    "Orchestration pausing gracefully — current task will finish, then execution stops.",
+                    "Orchestration pausing gracefully - current task will finish, then execution stops.",
                     "warning"
                 );
                 // Notify the orchestrator LLM so it knows a pause was requested
@@ -662,7 +662,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             plan.status = "paused";
             StateManager.savePlan(plan);
 
-            ctx.ui.notify("Orchestration stopped. Plan preserved — use /om-resume to continue.", "warning");
+            ctx.ui.notify("Orchestration stopped. Plan preserved - use /om-resume to continue.", "warning");
         }
     });
 

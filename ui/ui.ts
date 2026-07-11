@@ -20,7 +20,7 @@ import {
 import { MAX_CLARIFICATIONS, OrchestrationPlan, Task } from "../core/types";
 
 // ---------------------------------------------------------------------------
-// OrchestrationEditor — extends CustomEditor to color the input border based
+// OrchestrationEditor - extends CustomEditor to color the input border based
 // on orchestration mode (derived from explicit boolean flags):
 //   amber  = planning mode
 //   green  = executing mode
@@ -63,7 +63,7 @@ function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     if (!OrchestratorState.isActive || !OrchestratorState.theme) return null;
 
     const plan = StateManager.loadPlan();
-    // No plan on disk yet — orchestration is active, so we're in the initial planning phase.
+    // No plan on disk yet - orchestration is active, so we're in the initial planning phase.
     // Return amber (warning) to indicate "building a plan" state.
     if (!plan) {
         return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "warning");
@@ -73,10 +73,10 @@ function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     let color: SemanticColor;
 
     if (phaseLabel) {
-        // Use the shared PHASE_LABEL_COLORS lookup table — same one used by buildPlanDisplay / resolveStatusLabelAndColor.
+        // Use the shared PHASE_LABEL_COLORS lookup table - same one used by buildPlanDisplay / resolveStatusLabelAndColor.
         color = PHASE_LABEL_COLORS[phaseLabel] ?? "text";
     } else {
-        // Not in execution mode — fall back to plan status colors (planning, pausing, etc.)
+        // Not in execution mode - fall back to plan status colors (planning, pausing, etc.)
         if (OrchestratorState.planningMode) {
             color = PLAN_STATUS_COLORS["planning"] ?? "warning";
         } else {
@@ -195,10 +195,10 @@ const PHASE_DETAIL_RENDERERS: Record<
         } else {
             const failedTasks = plan.tasks?.filter((t2: Task) => t2.status === "failed") || [];
             if (failedTasks.length > 0) {
-                lines.push(t.fg("error", `  -> ${failedTasks.length} task(s) failed — awaiting orchestrator decision`));
+                lines.push(t.fg("error", `  -> ${failedTasks.length} task(s) failed - awaiting orchestrator decision`));
                 lines.push(t.fg("dim", "  Use /om-resume to wake the orchestrator"));
             } else {
-                lines.push(t.fg("warning", "  -> Execution paused — awaiting orchestrator decision"));
+                lines.push(t.fg("warning", "  -> Execution paused - awaiting orchestrator decision"));
                 lines.push(t.fg("dim", "  Use /om-resume to continue"));
             }
         }
@@ -333,7 +333,7 @@ function buildPlanDisplay(
                 }
             }
         } else {
-            // Compact widget view — show all active tasks
+            // Compact widget view - show all active tasks
             if (activeTasks.length > 0) {
                 // Group by status category for compact single-line rendering
                 const runningTasks = activeTasks.filter(
@@ -387,7 +387,7 @@ const OVERLAY_RESERVED_LINES = 5;
 
 /** Compute usable content lines for the overlay.
  * We use a fixed budget rather than trying to estimate terminal height from
- * render width — the width-based heuristic (width × 0.28) is unreliable across
+ * render width - the width-based heuristic (width × 0.28) is unreliable across
  * different TUI layouts and can severely under-count available rows.
  *
  * The framework enforces the 70 % maxHeight cap, so if we emit more lines than

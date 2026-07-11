@@ -21,7 +21,7 @@ export function registerExecutionControlTools(pi: ExtensionAPI) {
         promptGuidelines: [
             "Use orchestrate_ready_tasks to find which task to act on next.",
             "Tasks in 'ready' can be started immediately with orchestrate_start_task.",
-            "Tasks in 'running' are already executing — do not start them, wait for completion.",
+            "Tasks in 'running' are already executing - do not start them, wait for completion.",
             "Tasks in 'failed' need recovery: use orchestrate_replan then orchestrate_edit_task."
         ],
         parameters: Type.Object({}),
@@ -65,7 +65,7 @@ export function registerExecutionControlTools(pi: ExtensionAPI) {
                             JSON.stringify({ ready, running, failed }) +
                             (running.length > 0
                                 ? `
-Note: task(s) ${running.join(", ")} still executing. The system will wake you automatically when complete — do not call any other tools.`
+Note: task(s) ${running.join(", ")} still executing. The system will wake you automatically when complete - do not call any other tools.`
                                 : "") +
                             (failed.length > 0
                                 ? `
@@ -133,7 +133,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             plan.currentTaskId = task.id;
             StateManager.savePlan(plan);
 
-            // Signal that sub-agent execution has begun — loop detection can now activate.
+            // Signal that sub-agent execution has begun - loop detection can now activate.
             signalTaskStarted();
 
             Runner.runTasks(getPi()).catch((err) => {
@@ -168,7 +168,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (!plan) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
-            // Return a concise summary — not the full markdown plan
+            // Return a concise summary - not the full markdown plan
             const lines: string[] = [];
             lines.push(`Goal: ${plan.goal}`);
             lines.push(`Status: ${plan.status}`);
@@ -315,7 +315,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             return {
-                content: [{ type: "text", text: "All processes stopped. Plan paused — use /om-resume to continue." }],
+                content: [{ type: "text", text: "All processes stopped. Plan paused - use /om-resume to continue." }],
                 terminate: true,
                 details: {}
             };

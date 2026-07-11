@@ -16,7 +16,7 @@ interface OrchestratorStatusEntry {
  * to append them without polluting the LLM context window.
  *
  * Unlike pi.sendMessage() which adds messages to conversation history (consuming
- * tokens), these entries are TUI-only — they appear in the transcript as styled
+ * tokens), these entries are TUI-only - they appear in the transcript as styled
  * status cards but never reach the model's context. This keeps token usage lean
  * on long plans with 20+ tasks where dozens of notifications accumulate.
  */

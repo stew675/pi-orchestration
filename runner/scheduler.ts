@@ -6,7 +6,7 @@ import { StateManager } from "../context/state-manager";
 import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage } from "./utils";
 
 // ---------------------------------------------------------------------------
-// Scheduling lock — ensures only one scheduling decision runs at a time.
+// Scheduling lock - ensures only one scheduling decision runs at a time.
 // ---------------------------------------------------------------------------
 
 let schedulingLock = Promise.resolve();
@@ -114,7 +114,7 @@ export async function runTasks(
                     return;
                 }
 
-                // allCompleted — handled after lock release (fall through)
+                // allCompleted - handled after lock release (fall through)
             } else {
                 taskToRun = readyTasks[0];
             }
@@ -122,7 +122,7 @@ export async function runTasks(
             releaseSchedulingLock();
         }
 
-        // All tasks completed — finish the plan
+        // All tasks completed - finish the plan
         if (!taskToRun) {
             await finishPlan(pi, model);
             return;
@@ -174,7 +174,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
         savePlanSafely(finalPlan);
 
         // Build a contextual wakeup message with task summaries so the orchestrator
-        // has everything it needs to decide — no need for redundant verification tasks.
+        // has everything it needs to decide - no need for redundant verification tasks.
         const reviewMessage = buildFinalReviewMessage(finalPlan);
         notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
     }

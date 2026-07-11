@@ -87,7 +87,7 @@ describe("formatTimeout", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Round-trip consistency (non-zero values only — 0 maps to "no timeout" string, not back to 0)
+// Round-trip consistency (non-zero values only - 0 maps to "no timeout" string, not back to 0)
 // ---------------------------------------------------------------------------
 
 describe("parseTimeout ↔ formatTimeout round-trip", () => {

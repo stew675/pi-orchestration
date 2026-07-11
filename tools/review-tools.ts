@@ -30,7 +30,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            // Only allow approval during the review phase — prevents premature approval
+            // Only allow approval during the review phase - prevents premature approval
             if (plan.status !== REVIEW_STATUS) {
                 throw new Error(
                     `Cannot approve: plan is in '${plan.status}' status. ` +

@@ -14,7 +14,7 @@ export function parseValidateToolCall(toolName: string): "pass" | "fail" | null 
 
 /** Register the validator tools (orchestrate_validate_pass, orchestrate_validate_fail).
  *
- * These are thin signal-only tools — when called they immediately tell the model to stop.
+ * These are thin signal-only tools - when called they immediately tell the model to stop.
  * The orchestrator detects which tool was invoked via stdout events and resolves accordingly. */
 export function registerValidatorTools(pi: ExtensionAPI) {
     pi.registerTool({
@@ -22,13 +22,13 @@ export function registerValidatorTools(pi: ExtensionAPI) {
         label: "Validate Pass",
         description: [
             "Call this when you have verified the task was completed successfully.",
-            "After calling, stop — do not make any further tool calls or messages."
+            "After calling, stop - do not make any further tool calls or messages."
         ].join("\n"),
         parameters: { type: "object" } as any,
         async execute() {
             return {
                 content: [
-                    { type: "text", text: "Validation passed. You may now stop — no further action needed." }
+                    { type: "text", text: "Validation passed. You may now stop - no further action needed." }
                 ] as any,
                 terminate: true,
                 details: {}
@@ -41,13 +41,13 @@ export function registerValidatorTools(pi: ExtensionAPI) {
         label: "Validate Fail",
         description: [
             "Call this when you have determined the task was NOT completed successfully.",
-            "After calling, stop — do not make any further tool calls or messages."
+            "After calling, stop - do not make any further tool calls or messages."
         ].join("\n"),
         parameters: { type: "object" } as any,
         async execute() {
             return {
                 content: [
-                    { type: "text", text: "Validation failed. You may now stop — no further action needed." }
+                    { type: "text", text: "Validation failed. You may now stop - no further action needed." }
                 ] as any,
                 terminate: true,
                 details: {}

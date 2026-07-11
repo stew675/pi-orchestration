@@ -63,7 +63,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 description:
                     "IDs of tasks that create or modify files this task needs. " +
                     "Build/compile/test tasks MUST list ALL code-creation tasks as dependencies. " +
-                    "Never leave empty for file-operating tasks — causes data races with parallel execution."
+                    "Never leave empty for file-operating tasks - causes data races with parallel execution."
             }),
             complexity: StringEnum(["simple", "complex"]),
             taskType: Type.Optional(
@@ -123,7 +123,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     const simulatedPlan = { ...plan, tasks: [...plan.tasks, newTask] };
                     await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
 
-                    // All checks passed — safe to mutate.
+                    // All checks passed - safe to mutate.
                     plan.tasks.push(newTask);
                 } catch (e) {
                     throw new Error(
@@ -171,7 +171,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             if (matchedVague) {
                 warnings.push(
                     `Guidance: task '${params.id}' description uses broad language matching "${matchedVague.source}". ` +
-                        `The sub-agent will implement literally what you describe — list specific items explicitly (e.g., exact function names, file paths).`
+                        `The sub-agent will implement literally what you describe - list specific items explicitly (e.g., exact function names, file paths).`
                 );
             }
 
@@ -197,7 +197,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 warnings.push(
                     `Guidance: '${params.id}' appears to be a build/test task. ` +
                         `Instruct the sub-agent to write test results or build logs to a file (e.g., test_results.txt). ` +
-                        `The validator can only verify completion by reading files — stdout claims are truncated and insufficient.`
+                        `The validator can only verify completion by reading files - stdout claims are truncated and insufficient.`
                 );
             }
 
@@ -270,7 +270,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         promptSnippet: "Mark a task as complete without re-running it",
         promptGuidelines: [
             "Use orchestrate_complete_task when you have verified that a task's work is actually done (e.g., files exist, tests pass) even though the sub-agent timed out or crashed.",
-            "This bypasses validation — only use when you are confident the work is correct.",
+            "This bypasses validation - only use when you are confident the work is correct.",
             "Provide a summary of what was accomplished so downstream tasks have context."
         ],
         parameters: Type.Object({
@@ -382,7 +382,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 };
                 await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
 
-                // All checks passed — safe to mutate.
+                // All checks passed - safe to mutate.
                 if (params.description !== undefined) task.description = params.description;
                 if (params.files !== undefined) task.files = params.files;
                 if (params.dependencies !== undefined) task.dependencies = params.dependencies;

@@ -21,7 +21,7 @@ function createMarkdown(text: string) {
     return new Markdown(text, MARKDOWN_OFFSET, MARKDOWN_OFFSET, getMarkdownTheme());
 }
 
-/** Render plan tool output as plain markdown — no colored box background. */
+/** Render plan tool output as plain markdown - no colored box background. */
 export const renderPlanResult = (result: any) => {
     const text = (result.content?.[0] as { type?: string; text?: string })?.text ?? "";
     return createMarkdown(text);
@@ -30,7 +30,7 @@ export const renderPlanResult = (result: any) => {
 /** Render result for orchestrate_write_plan. */
 export function renderWritePlanResult(_result: any, options: { isPartial: boolean }, _theme: any) {
     if (options.isPartial) return;
-    // Plan already visible on screen from renderCall — return nothing to avoid redundancy.
+    // Plan already visible on screen from renderCall - return nothing to avoid redundancy.
     return { render: () => [], invalidate: () => {} };
 }
 
@@ -40,7 +40,7 @@ export function renderWritePlanCall(_args: any, theme: any, context: { isPartial
     if (typeof content === "string" && content.trim().length > 0) {
         return createMarkdown(content);
     }
-    // No content yet — show compact title
+    // No content yet - show compact title
     const text = theme.fg("toolTitle", theme.bold("orchestrate_write_plan"));
     return { render: () => [text], invalidate: () => {} };
 }
@@ -54,7 +54,7 @@ export function renderWritePlanCall(_args: any, theme: any, context: { isPartial
  * Throws an error if a critical violation is found.
  *
  * Note: dangling dependency detection has been moved to pre-mutation validators
- * (validateAddTask / validateEditTask) — the table should never reach save time
+ * (validateAddTask / validateEditTask) - the table should never reach save time
  * with invalid references.
  */
 export async function validatePlan(plan: any, archivedTaskIds?: Set<string>) {
@@ -80,7 +80,7 @@ export async function validatePlan(plan: any, archivedTaskIds?: Set<string>) {
         const taskDetails = oversized
             .map(
                 (t: any) =>
-                    `\n- Task '${t.taskId}': ${t.fileCount} files (limit for "${t.taskType}": ${t.limit}) — "${t.description}"`
+                    `\n- Task '${t.taskId}': ${t.fileCount} files (limit for "${t.taskType}": ${t.limit}) - "${t.description}"`
             )
             .join("");
         throw new Error(
@@ -102,7 +102,7 @@ export async function validatePlan(plan: any, archivedTaskIds?: Set<string>) {
  * validatePlan on a simulated plan object.
  */
 export async function validateAddTask(existingTaskIds: Set<string>, newTaskId: string, dependencies: string[]) {
-    // Dependency existence — must reference an existing task or self.
+    // Dependency existence - must reference an existing task or self.
     const missingDeps = dependencies.filter((depId) => !existingTaskIds.has(depId) && depId !== newTaskId);
     if (missingDeps.length > 0) {
         throw new Error(
@@ -164,7 +164,7 @@ export function requireExecutionMode() {
 export function requirePlanNotExecuting() {
     const plan = StateManager.loadPlan();
     if (!plan) throw new Error("No plan exists.");
-    // Block task modification during active execution — orchestrator must call
+    // Block task modification during active execution - orchestrator must call
     // orchestrate_replan first to shift into recovery mode (status: "planning").
     // Allowed in: "planning" (recovery), "paused", "reviewing" (final verification).
     const allowedStatuses = new Set(["planning", "paused", "reviewing"]);
@@ -207,6 +207,6 @@ export function sendSilentGuidance(message: string) {
             { deliverAs: "nextTurn" }
         );
     } catch {
-        /* ignore — guidance is optional */
+        /* ignore - guidance is optional */
     }
 }

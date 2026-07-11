@@ -4,7 +4,13 @@ import * as path from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { safeWriteFile } from "../context/state-manager";
 
-import { DEFAULT_TASK_TIMEOUT_MS, DEFAULT_VALIDATOR_TIMEOUT_MS, DEFAULT_SUMMARY_TIMEOUT_MS } from "../core/types";
+import {
+    DEFAULT_TASK_TIMEOUT_MS,
+    DEFAULT_VALIDATOR_TIMEOUT_MS,
+    DEFAULT_SUMMARY_TIMEOUT_MS,
+    DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
+    DEFAULT_SUB_AGENT_MAX_TURNS
+} from "../core/types";
 
 /** Keys that hold model references (nullable ModelRef). */
 const MODEL_KEYS = [
@@ -20,7 +26,10 @@ const MODEL_KEYS = [
 const NUMBER_KEYS = ["summarizationConcurrency", "parallelTasks"] as const;
 
 /** Keys that hold timeout values (in ms). */
-const TIMEOUT_KEYS = ["taskTimeoutMs", "validatorTimeoutMs", "taskSummaryTimeoutMs"] as const;
+const TIMEOUT_KEYS = ["taskTimeoutMs", "validatorTimeoutMs", "taskSummaryTimeoutMs", "subAgentIdleTimeoutMs"] as const;
+
+/** Keys that hold integer limits. */
+const LIMIT_KEYS = ["subAgentMaxTurns"] as const;
 
 /** Keys that hold boolean behaviour flags. */
 const BOOL_KEYS = ["allowStopTool", "validateSimpleTasks", "validateComplexTasks"] as const;
@@ -30,6 +39,7 @@ type SettingKey =
     | (typeof MODEL_KEYS)[number]
     | (typeof NUMBER_KEYS)[number]
     | (typeof TIMEOUT_KEYS)[number]
+    | (typeof LIMIT_KEYS)[number]
     | (typeof BOOL_KEYS)[number];
 
 /** Persisted model preferences for the orchestration extension. */
@@ -46,6 +56,9 @@ interface OrchestrationSettings {
     taskTimeoutMs?: number;
     validatorTimeoutMs?: number;
     taskSummaryTimeoutMs?: number;
+    subAgentIdleTimeoutMs?: number;
+    // Global limits
+    subAgentMaxTurns?: number;
     // Behaviour flags
     allowStopTool?: boolean;
     validateSimpleTasks?: boolean;
@@ -89,7 +102,7 @@ function loadSettings(): OrchestrationSettings {
     if (fs.existsSync(projectPath)) {
         return loadFile(projectPath);
     }
-    // No project-local file — fall back to global
+    // No project-local file - fall back to global
     return loadFile(getGlobalSettingsPath());
 }
 
@@ -117,7 +130,7 @@ function clearProjectSettings() {
 }
 
 /**
- * Typed accessor for OrchestrationSettings — avoids repeated `(settings as any)` casts.
+ * Typed accessor for OrchestrationSettings - avoids repeated `(settings as any)` casts.
  */
 function getSetting<K extends keyof OrchestrationSettings>(
     settings: OrchestrationSettings,
@@ -136,20 +149,20 @@ function getSetting<K extends keyof OrchestrationSettings>(
 export function applySettingsToState(state: Record<SettingKey, unknown>) {
     const settings = loadSettings();
 
-    // Model references — apply if truthy (non-null/non-undefined)
+    // Model references - apply if truthy (non-null/non-undefined)
     for (const key of MODEL_KEYS) {
         if (getSetting(settings, key)) state[key] = getSetting(settings, key);
     }
 
-    // Numeric values — apply only if explicitly a number
-    for (const key of [...NUMBER_KEYS, ...TIMEOUT_KEYS]) {
+    // Numeric values - apply only if explicitly a number
+    for (const key of [...NUMBER_KEYS, ...TIMEOUT_KEYS, ...LIMIT_KEYS]) {
         const value = getSetting(settings, key as keyof OrchestrationSettings);
         if (typeof value === "number") {
             state[key] = value;
         }
     }
 
-    // Boolean flags — apply only if explicitly a boolean
+    // Boolean flags - apply only if explicitly a boolean
     for (const key of BOOL_KEYS) {
         const value = getSetting(settings, key as keyof OrchestrationSettings);
         if (typeof value === "boolean") {
@@ -172,7 +185,7 @@ export function resetToDefaults(state: Record<SettingKey, unknown>): Orchestrati
     // Now loadSettings() will fall back to global (or empty)
     const effective = loadSettings();
 
-    // Model keys — set from effective or null
+    // Model keys - set from effective or null
     for (const key of MODEL_KEYS) {
         state[key] = (effective as any)[key] ?? null;
     }
@@ -183,15 +196,19 @@ export function resetToDefaults(state: Record<SettingKey, unknown>): Orchestrati
     }
     state.parallelTasks = typeof effective.parallelTasks === "number" ? effective.parallelTasks : 1;
 
-    // Timeout defaults — use built-in constants when not in global settings
+    // Timeout defaults - use built-in constants when not in global settings
     if (typeof effective.taskTimeoutMs === "number") state.taskTimeoutMs = effective.taskTimeoutMs;
     else state.taskTimeoutMs = DEFAULT_TASK_TIMEOUT_MS;
     if (typeof effective.validatorTimeoutMs === "number") state.validatorTimeoutMs = effective.validatorTimeoutMs;
     else state.validatorTimeoutMs = DEFAULT_VALIDATOR_TIMEOUT_MS;
     if (typeof effective.taskSummaryTimeoutMs === "number") state.taskSummaryTimeoutMs = effective.taskSummaryTimeoutMs;
     else state.taskSummaryTimeoutMs = DEFAULT_SUMMARY_TIMEOUT_MS;
+    if (typeof effective.subAgentIdleTimeoutMs === "number") state.subAgentIdleTimeoutMs = effective.subAgentIdleTimeoutMs;
+    else state.subAgentIdleTimeoutMs = DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS;
+    if (typeof effective.subAgentMaxTurns === "number") state.subAgentMaxTurns = effective.subAgentMaxTurns;
+    else state.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
 
-    // Behaviour flags — hard-coded defaults
+    // Behaviour flags - hard-coded defaults
     state.allowStopTool = true;
     state.validateSimpleTasks = false;
     state.validateComplexTasks = true;
@@ -219,7 +236,7 @@ export function persistSettings(state: Record<SettingKey, unknown>): void {
         }
     }
 
-    // Model keys — store if truthy, delete if null/undefined
+    // Model keys - store if truthy, delete if null/undefined
     for (const key of MODEL_KEYS) {
         if ((state as any)[key]) {
             settings[key] = (state as any)[key];
@@ -228,26 +245,30 @@ export function persistSettings(state: Record<SettingKey, unknown>): void {
         }
     }
 
-    // summarizationConcurrency — only store if non-default (0)
+    // summarizationConcurrency - only store if non-default (0)
     if (state.summarizationConcurrency !== 0) {
         settings.summarizationConcurrency = state.summarizationConcurrency as number;
     } else {
         delete settings.summarizationConcurrency;
     }
 
-    // parallelTasks — only store if non-default (1)
+    // parallelTasks - only store if non-default (1)
     if ((state.parallelTasks as number) !== undefined && (state.parallelTasks as number) !== 1) {
         settings.parallelTasks = state.parallelTasks as number;
     } else {
         delete settings.parallelTasks;
     }
 
-    // Timeouts — always stored explicitly so they survive reloads
+    // Timeouts - always stored explicitly so they survive reloads
     settings.taskTimeoutMs = state.taskTimeoutMs as number;
     settings.validatorTimeoutMs = state.validatorTimeoutMs as number;
     settings.taskSummaryTimeoutMs = state.taskSummaryTimeoutMs as number;
+    settings.subAgentIdleTimeoutMs = state.subAgentIdleTimeoutMs as number;
 
-    // Behaviour flags — only store if non-default
+    // Global limits - always stored explicitly
+    settings.subAgentMaxTurns = state.subAgentMaxTurns as number;
+
+    // Behaviour flags - only store if non-default
     const boolDefaults: Array<{ key: (typeof BOOL_KEYS)[number]; defaultValue: boolean }> = [
         { key: "allowStopTool", defaultValue: true },
         { key: "validateSimpleTasks", defaultValue: false },

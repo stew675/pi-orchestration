@@ -10,6 +10,8 @@ export {
     DEFAULT_TASK_TIMEOUT_MS,
     DEFAULT_VALIDATOR_TIMEOUT_MS,
     DEFAULT_SUMMARY_TIMEOUT_MS,
+    DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
+    DEFAULT_SUB_AGENT_MAX_TURNS,
     isTaskReadOnly,
     tryParseSubAgentEvent,
     getEventToolName,
@@ -46,6 +48,7 @@ export {
     setSummarizationConcurrency,
     setParallelTasks,
     setTimeoutMs,
+    setSubAgentMaxTurns,
     setBooleanSetting,
     setModelRef
 } from "./state-singleton";

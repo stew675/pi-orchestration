@@ -77,7 +77,7 @@ export function drainPlanChangeListeners(): void {
     planChangeListeners = [];
 }
 
-/** Fire UI listeners without invalidating the in-memory cache. Used by savePlan() — we already have the plan in memory, no need to re-read disk. */
+/** Fire UI listeners without invalidating the in-memory cache. Used by savePlan() - we already have the plan in memory, no need to re-read disk. */
 function notifyPlanChange(): void {
     for (const listener of planChangeListeners) {
         try {
@@ -88,7 +88,7 @@ function notifyPlanChange(): void {
     }
 }
 
-/** Invalidate the in-memory cache and fire UI listeners. Used by clearPlan/clearPlanJsonOnly — disk state has been wiped, so we must re-read next time. */
+/** Invalidate the in-memory cache and fire UI listeners. Used by clearPlan/clearPlanJsonOnly - disk state has been wiped, so we must re-read next time. */
 function emitPlanChange() {
     cachedPlan = undefined;
     notifyPlanChange();
@@ -198,7 +198,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     if (!obj || typeof obj !== "object") return null;
     const plan = obj as Record<string, unknown> & { tasks?: Array<Record<string, unknown>> };
 
-    // Plan-level fields must be intact — we can't recover a missing goal or bad status.
+    // Plan-level fields must be intact - we can't recover a missing goal or bad status.
     if (typeof plan.goal !== "string") {
         console.warn("Plan recovery failed: missing or invalid 'goal' field");
         return null;
@@ -243,7 +243,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
         return isValidTask(t);
     });
 
-    // Deduplicate by ID — keep first occurrence, drop later ones.
+    // Deduplicate by ID - keep first occurrence, drop later ones.
     const seenIds = new Set<string>();
     const deduped: typeof tasks = [];
     for (const task of tasks) {
@@ -277,7 +277,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
         tasks: tasks as unknown as OrchestrationPlan["tasks"]
     };
 
-    // Final validation — if it passes, we have a recovered plan.
+    // Final validation - if it passes, we have a recovered plan.
     if (isValidOrchestrationPlan(repaired)) {
         for (const w of warnings) {
             console.warn(`Plan recovery: ${w}`);
@@ -289,7 +289,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
         return repaired;
     }
 
-    // Recovery failed — log what we had and give up.
+    // Recovery failed - log what we had and give up.
     console.warn(
         `Plan recovery failed after repairs (${warnings.length} issue(s) addressed, still invalid). ` +
             `The plan file may need manual intervention.`
@@ -319,7 +319,7 @@ export function safeWriteFile(targetPath: string, content: string): void {
                 fs.fsyncSync(fdOld);
             } catch (fsyncErr) {
                 console.warn(
-                    `Backup fsync failed for ${oldPath} — new write will proceed without synced backup:`,
+                    `Backup fsync failed for ${oldPath} - new write will proceed without synced backup:`,
                     fsyncErr
                 );
             } finally {
@@ -346,7 +346,7 @@ export function safeWriteFile(targetPath: string, content: string): void {
  *
  * Handles atomic writes (write-to-temp + rename), Markdown rendering,
  * task prompt persistence, and archive management. All public methods
- * are synchronous — they block the caller during I/O.
+ * are synchronous - they block the caller during I/O.
  */
 export class StateManager {
     /** Ensure all required directories exist on disk (orchestration/, plans/, tasks/, archive/, agent-logs/, summaries/, validations/). */
@@ -370,7 +370,7 @@ export class StateManager {
      * Returns null if the file is missing or structurally invalid.
      */
     static loadPlan(): OrchestrationPlan | null {
-        // Return cached plan if available — avoids repeated sync disk reads in UI render cycles.
+        // Return cached plan if available - avoids repeated sync disk reads in UI render cycles.
         // Cache is invalidated by emitPlanChange() on every save/clear operation.
         if (cachedPlan !== undefined) return cachedPlan;
 
@@ -386,7 +386,7 @@ export class StateManager {
                     return parsed;
                 }
 
-                // Strict validation failed — attempt best-effort recovery.
+                // Strict validation failed - attempt best-effort recovery.
                 const recovered = recoverPlan(parsed);
                 if (recovered) {
                     cachedPlan = recovered;
@@ -394,7 +394,7 @@ export class StateManager {
                     try {
                         safeWriteFile(filePath, JSON.stringify(recovered, null, 2));
                     } catch {
-                        /* If we can't write back, return recovered anyway — caller will re-save on next savePlan. */
+                        /* If we can't write back, return recovered anyway - caller will re-save on next savePlan. */
                     }
                     return recovered;
                 }
@@ -479,7 +479,7 @@ export class StateManager {
 
             this.renderMarkdown(plan);
 
-            // Update in-memory cache — we already have the authoritative plan object.
+            // Update in-memory cache - we already have the authoritative plan object.
             // No need to re-read from disk on next loadPlan().
             cachedPlan = plan;
 
@@ -500,7 +500,7 @@ export class StateManager {
             if (fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true });
         };
 
-        // Directory paths — remove recursively (includes plan files now under plans/)
+        // Directory paths - remove recursively (includes plan files now under plans/)
         for (const getter of [
             getPlansDir,
             getTasksDir,
@@ -570,7 +570,7 @@ export class StateManager {
     }
 
     /** Persist the validator response to `validations/<taskId>.response.json` for debugging.
-     *  Contains {pass, feedback, validatedAt} — mirrors the summary persistence pattern. */
+     *  Contains {pass, feedback, validatedAt} - mirrors the summary persistence pattern. */
     static persistValidationResponse(taskId: string, result: { pass: boolean; feedback?: string }): void {
         this.initDirs();
         const cleanId = path.basename(taskId);
@@ -609,7 +609,7 @@ export class StateManager {
         if (fs.existsSync(p)) fs.unlinkSync(p);
     }
 
-    /** @internal Returns the IDs of all archived tasks derived from `.result.json` filenames in archive/. Kept for a future "view history" feature — currently unused. */
+    /** @internal Returns the IDs of all archived tasks derived from `.result.json` filenames in archive/. Kept for a future "view history" feature - currently unused. */
     static getArchivedTasks(): string[] {
         this.initDirs();
         const archiveDir = getArchiveDir();
@@ -621,7 +621,7 @@ export class StateManager {
     }
 
     /** Escape Markdown/HTML in short inline metadata fields (goal, task id).
-     *  Does NOT escape # — use for single-line values where accidental headings
+     *  Does NOT escape # - use for single-line values where accidental headings
      *  could be problematic; callers should strip leading # if needed. */
     static escapeMdInline(text: string): string {
         return text
@@ -630,7 +630,7 @@ export class StateManager {
             .replace(/>/g, "&gt;");
     }
 
-    /** Escape for multi-line content (task summaries) — preserves markdown structure.
+    /** Escape for multi-line content (task summaries) - preserves markdown structure.
      *  Only escapes HTML angle brackets outside of fenced code blocks (```...```).
      *  Inside code blocks, `<` and `>` are left intact so comparisons like
      *  `arr[i] > arr[i+1]` remain readable. */
@@ -673,7 +673,7 @@ export class StateManager {
                 lines.push(`    - Complexity: ${task.complexity}`);
             }
             if (task.result?.summary) {
-                // Summaries contain their own markdown structure — preserve it
+                // Summaries contain their own markdown structure - preserve it
                 const safeSummary = StateManager.escapeMdContent(task.result.summary);
                 lines.push(`    - Result:\n\n${safeSummary}`);
             }
@@ -699,7 +699,7 @@ export class StateManager {
 
     /** Load the implementation plan (high-level narrative) if it exists. Uses in-memory cache when available. */
     static loadImplementationPlan(): string | null {
-        // Return cached value if available — avoids repeated sync disk reads.
+        // Return cached value if available - avoids repeated sync disk reads.
         if (cachedImplementationPlan !== undefined) return cachedImplementationPlan;
 
         const filePath = getImplementationPlanPath();
@@ -719,7 +719,7 @@ export class StateManager {
         cachedImplementationPlan = content; // update in-memory cache
     }
 
-    /** Edit the implementation plan — find and replace a single region. Updates in-memory cache so subsequent loads don't re-read disk. */
+    /** Edit the implementation plan - find and replace a single region. Updates in-memory cache so subsequent loads don't re-read disk. */
     static editImplementationPlan(oldText: string, newText: string): string {
         this.initDirs();
         const filePath = getImplementationPlanPath();

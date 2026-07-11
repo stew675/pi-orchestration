@@ -2,9 +2,11 @@ import type { ModelRef } from "../core/types";
 import { tryParseSubAgentEvent, SubAgentEvent, getEventToolName } from "../core/types";
 import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
+import * as monitor from "../process/monitor";
 import { spawnAgent } from "../process/process-manager";
 import { buildValidatorContext } from "../context/context-builder";
 import { parseValidateToolCall, VALIDATOR_TOOLS } from "../tools/validator-tools";
+import { formatTimeout } from "../settings/time-utils";
 
 // ---------------------------------------------------------------------------
 // Feedback message constants
@@ -19,7 +21,7 @@ const VALIDATOR_MAX_ATTEMPTS = 2;
  * Validate a task by spawning validator sub-agent(s) with retry on non-verdict.
  *
  * The validator is given two tools: orchestrate_validate_pass and
- * orchestrate_validate_fail. Whichever it calls signals the verdict — no JSON
+ * orchestrate_validate_fail. Whichever it calls signals the verdict - no JSON
  * parsing needed. If neither tool is called before timeout, that counts as a
  * failure (retried once).
  */
@@ -32,7 +34,7 @@ export async function validateTask(
     transcriptLogFile?: string
 ): Promise<{ pass: boolean; feedback?: string }> {
     if (OrchestratorState.shuttingDown) {
-        return { pass: false, feedback: "Validation skipped — orchestrator is shutting down." };
+        return { pass: false, feedback: "Validation skipped - orchestrator is shutting down." };
     }
 
     const context = buildValidatorContext(taskDescription, artifactFiles, sessionTranscript, transcriptLogFile);
@@ -60,11 +62,12 @@ export async function validateTask(
 
 /** Spawn a single validator sub-agent and detect which validate tool it calls. */
 async function runValidatorOnce(
-    _taskId: string,
+    taskId: string,
     promptContent: string,
     model?: ModelRef,
     attempt: number = 1
 ): Promise<{ pass: boolean; feedback?: string }> {
+    const monitorId = `${taskId}-validator`;
     return await new Promise((resolve) => {
         // Read-only file access + our two validate tools.
         const toolsArg = `read,ls,find,grep,${VALIDATOR_TOOLS}`;
@@ -83,9 +86,14 @@ async function runValidatorOnce(
             args,
             {
                 timeoutMs: OrchestratorState.validatorTimeoutMs,
-                label: `validator attempt ${attempt}`
+                label: `validator ${taskId} attempt ${attempt}`,
+                taskId: monitorId
             },
             (line) => {
+                // Feed every raw line to the monitor for JSON parsing.
+                // skipActive: true so the validator doesn't hijack the /om-status view.
+                monitor.ingestLine(monitorId, line, { skipActive: true });
+
                 const event = tryParseSubAgentEvent(line);
                 if (!event) return;
 
@@ -107,10 +115,15 @@ async function runValidatorOnce(
             }
         );
 
+        // Register with the unified monitor so watchdog can enforce idle/turns limits.
+        const taggedId = `validator-${taskId}`;
+        monitor.registerAgent(taggedId, child);
+
         child.on("close", () => {
             clearTimeout();
+            // Don't clear active task - another sub-agent may be running concurrently
 
-            // Verdict from tool call — definitive.
+            // Verdict from tool call - definitive.
             if (verdict === "pass") {
                 resolve({ pass: true, feedback: "" });
                 return;
@@ -120,9 +133,22 @@ async function runValidatorOnce(
                 return;
             }
 
-            // No tool call — check process state.
+            // Check if watchdog killed this agent for idle/turns reasons.
+            const taggedId = `validator-${taskId}`;
+            const monState = monitor.getMonitoredAgent(taggedId);
+            const killReason = monState?.killedByWatchdog ?? null;
+
+            if (killReason === "idle_timeout") {
+                resolve({ pass: false, feedback: `Validator idle timeout — no JSON stream activity for ${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)}.` });
+                return;
+            }
+            if (killReason === "max_turns") {
+                resolve({ pass: false, feedback: `Validator exceeded max turns limit of ${OrchestratorState.subAgentMaxTurns}.` });
+                return;
+            }
+
+            // Killed by timeout or loop detector.
             if (child.killed) {
-                // Killed by timeout or loop detector.
                 resolve({ pass: false, feedback: FEEDBACK_TIMEOUT });
                 return;
             }
@@ -139,6 +165,7 @@ async function runValidatorOnce(
 
         child.on("error", (err) => {
             clearTimeout();
+            // Don't clear active task - another sub-agent may be running concurrently
             resolve({ pass: false, feedback: `${FEEDBACK_PROCESS_ERROR_PREFIX}${err.message}` });
         });
     });

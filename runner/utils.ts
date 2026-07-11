@@ -63,7 +63,7 @@ function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void 
             timestamp: Date.now()
         });
     } catch (e) {
-        // Non-fatal — status entry is purely cosmetic. The sendMessage below still works.
+        // Non-fatal - status entry is purely cosmetic. The sendMessage below still works.
         console.warn("Failed to append orchestration status entry:", e);
     }
 }
@@ -118,7 +118,7 @@ export function buildFinalReviewMessage(plan: OrchestrationPlan, introLine?: str
     parts.push("Review instructions:");
     parts.push(
         "1. Inspect the project files and verify they satisfy the original goal.",
-        "2. If a build/compile/test task already ran successfully (see above), do NOT add another verification task — the work was already validated.",
+        "2. If a build/compile/test task already ran successfully (see above), do NOT add another verification task - the work was already validated.",
         "3. Only add a remediation task if you find a genuine gap (e.g., missing file, unverified behavior). Check completed tasks first!",
         "4. If everything meets the goal, call orchestrate_approve_goal to finish."
     );

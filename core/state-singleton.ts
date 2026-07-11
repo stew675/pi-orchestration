@@ -5,6 +5,8 @@ import {
     DEFAULT_TASK_TIMEOUT_MS,
     DEFAULT_VALIDATOR_TIMEOUT_MS,
     DEFAULT_SUMMARY_TIMEOUT_MS,
+    DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
+    DEFAULT_SUB_AGENT_MAX_TURNS,
     EXECUTION_PHASE_STATUSES
 } from "./types";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
@@ -33,17 +35,17 @@ export const OrchestratorState = {
     summarizationConcurrency: 0,
     parallelTasks: 1,
     shuttingDown: false,
-    /** Original main model captured when entering orchestration mode — restored on exit. */
+    /** Original main model captured when entering orchestration mode - restored on exit. */
     originalMainModel: undefined as ModelRef | undefined,
-    /** Model active before entering planning mode (orchestration or main) — restored when exiting planning. */
+    /** Model active before entering planning mode (orchestration or main) - restored when exiting planning. */
     prePlanningModel: undefined as ModelRef | undefined,
-    /** Original system prompt captured on first orchestration turn — restored on exit. */
+    /** Original system prompt captured on first orchestration turn - restored on exit. */
     originalSystemPrompt: undefined as string | undefined,
     /** One-time flag: inject a restoration message on the next agent turn after exit. */
     pendingSystemPromptRestore: false,
     /** One-shot flag: when true, the next context request will be pruned to zero. */
     shouldResetContext: false,
-    /** One-shot flag: plan was just written/edited by the agent — show Accept/Edit dialog on next turn_end. */
+    /** One-shot flag: plan was just written/edited by the agent - show Accept/Edit dialog on next turn_end. */
     _planJustUpdated: false,
     /** Set to true when user explicitly pauses/stops. Disables the watchdog. */
     _manualPause: false,
@@ -58,8 +60,17 @@ export const OrchestratorState = {
     // --- Configurable timeouts (milliseconds; 0 = no timeout) ---
     taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS, // default watchdog for sub-agent tasks (12 min)
     validatorTimeoutMs: DEFAULT_VALIDATOR_TIMEOUT_MS, // default watchdog for validation agents (4 min)
-    taskSummaryTimeoutMs: DEFAULT_SUMMARY_TIMEOUT_MS // default watchdog for task summary agents (2 min)
+    taskSummaryTimeoutMs: DEFAULT_SUMMARY_TIMEOUT_MS, // default watchdog for task summary agents (2 min)
+
+    // --- Global sub-agent limits ---
+    subAgentIdleTimeoutMs: DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS, // idle timeout for any sub-agent (5m30s; 0 = disabled)
+    subAgentMaxTurns: DEFAULT_SUB_AGENT_MAX_TURNS // max model turns for any sub-agent (30; 0 = unlimited)
 };
+
+/** Global idle timeout for any sub-agent — no JSON stream activity (milliseconds; 0 = disabled). */
+OrchestratorState.subAgentIdleTimeoutMs = DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS;
+/** Global maximum model turns for any sub-agent (0 = unlimited). */
+OrchestratorState.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
 
 /**
  * Transition the orchestrator into a specific mode.
@@ -109,7 +120,7 @@ export function getPi(): ExtensionAPI {
 }
 
 /**
- * Guard for orchestration commands — returns true if the command should proceed.
+ * Guard for orchestration commands - returns true if the command should proceed.
  * When false, a "not active" message is shown via ctx.ui.notify.
  */
 export function requireActive(ctx: {
@@ -149,6 +160,11 @@ const STATE_DEFAULTS = {
     taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS,
     validatorTimeoutMs: DEFAULT_VALIDATOR_TIMEOUT_MS,
     taskSummaryTimeoutMs: DEFAULT_SUMMARY_TIMEOUT_MS,
+
+    // --- Global sub-agent limits ---
+    subAgentIdleTimeoutMs: DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
+    subAgentMaxTurns: DEFAULT_SUB_AGENT_MAX_TURNS,
+
     summarizationConcurrency: 0
 };
 
@@ -262,7 +278,7 @@ export async function enterPlanningMode(
     } else {
         console.warn(`No API key available for planning model ${planningModel.provider}/${planningModel.id}.`);
         ctx.ui?.notify?.(
-            `Cannot switch to planning model ${planningModel.provider}/${planningModel.id} — no configured API key.`,
+            `Cannot switch to planning model ${planningModel.provider}/${planningModel.id} - no configured API key.`,
             "warning"
         );
     }
@@ -295,7 +311,7 @@ export async function exitPlanningMode(
     } else {
         console.warn(`No API key available for pre-planning model ${pre.provider}/${pre.id}.`);
         ctx.ui?.notify?.(
-            `Cannot restore pre-planning model ${pre.provider}/${pre.id} — no configured API key.`,
+            `Cannot restore pre-planning model ${pre.provider}/${pre.id} - no configured API key.`,
             "warning"
         );
     }
@@ -313,10 +329,10 @@ export function beginShutdown(): void {
 /**
  * Update the set of active tools based on current orchestration mode.
  *
- * - **Inactive** — hides all orchestration tools, keeps base tools
- * - **Planning** — base tools + plan management (`orchestrate_write_plan`, `orchestrate_edit_plan`, `orchestrate_present_plan`)
- * - **Executing** — base tools + execution/task manipulation tools
- * - **Idle** — base tools only (exploration, no orchestration tools)
+ * - **Inactive** - hides all orchestration tools, keeps base tools
+ * - **Planning** - base tools + plan management (`orchestrate_write_plan`, `orchestrate_edit_plan`, `orchestrate_present_plan`)
+ * - **Executing** - base tools + execution/task manipulation tools
+ * - **Idle** - base tools only (exploration, no orchestration tools)
  *
  * Must be called after any mode change to ensure correct tool availability.
  */
@@ -325,21 +341,21 @@ export function updateActiveTools(pi: ExtensionAPI) {
     const BASE_TOOLS = ["read", "ls", "grep", "find"];
 
     if (!OrchestratorState.isActive) {
-        // Inactive — hide all orchestration tools
+        // Inactive - hide all orchestration tools
         const orchestratorToolNames = getAllOrchestrationToolNames();
         const active = allTools.filter((t) => !orchestratorToolNames.includes(t.name)).map((t) => t.name);
         pi.setActiveTools(active);
     } else if (OrchestratorState.planningMode) {
-        // Planning — exploration tools + plan management only.
+        // Planning - exploration tools + plan management only.
         // Block/task manipulation is gated until user approves via /om-accept.
         const active = allTools.filter((t) => [...BASE_TOOLS, ...PLANNING_TOOLS].includes(t.name)).map((t) => t.name);
         pi.setActiveTools(active);
     } else if (OrchestratorState.isExecuting) {
-        // Executing — show execution tools only (plan writing is gated; plan is already approved)
+        // Executing - show execution tools only (plan writing is gated; plan is already approved)
         const active = allTools.filter((t) => [...BASE_TOOLS, ...EXECUTION_TOOLS].includes(t.name)).map((t) => t.name);
         pi.setActiveTools(active);
     } else {
-        // Idle (orchestration active but not planning or executing) — exploration only
+        // Idle (orchestration active but not planning or executing) - exploration only
         const active = allTools.filter((t) => BASE_TOOLS.includes(t.name)).map((t) => t.name);
         pi.setActiveTools(active);
     }
@@ -348,7 +364,7 @@ export function updateActiveTools(pi: ExtensionAPI) {
 /** Orchestration tools that are safe to use during planning (plan file management). */
 const PLANNING_TOOLS = ["orchestrate_write_plan", "orchestrate_edit_plan", "orchestrate_present_plan"];
 
-/** Task manipulation tools — only available outside of planning mode. */
+/** Task manipulation tools - only available outside of planning mode. */
 const EXECUTION_TOOLS = [
     "orchestrate_add_task",
     "orchestrate_delete_task",
@@ -479,7 +495,7 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
         if (check()) return label;
     }
 
-    // Executing states — distinguish sub-phases
+    // Executing states - distinguish sub-phases
     if (plan.status === "executing") {
         const executionChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
             { check: () => activeCount > 0, label: "EXECUTION" },
@@ -496,7 +512,7 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
         return "IDLE";
     }
 
-    // Planning mode or other states — handled by existing logic in ui.ts
+    // Planning mode or other states - handled by existing logic in ui.ts
     return null;
 }
 
@@ -515,7 +531,7 @@ export function truncateToSentence(text: string, maxChars: number = 120): string
     // Find the earliest valid sentence boundary (both must be >= 0)
     const candidates = [periodSpaceIdx, periodNewlineIdx].filter((i) => i >= 0);
     if (candidates.length === 0) {
-        // No sentence boundary — stop at the first line break or hard limit
+        // No sentence boundary - stop at the first line break or hard limit
         const nlIdx = text.indexOf('\n');
         const crIdx = text.indexOf('\r');
         const lineBreak = [nlIdx, crIdx].filter((i) => i >= 0).length > 0 ? Math.min(...[nlIdx, crIdx].filter(i => i >= 0)) : Infinity;
@@ -532,7 +548,7 @@ export function truncateToSentence(text: string, maxChars: number = 120): string
         return text.slice(0, cutAt);
     }
 
-    // Boundary found but exceeds maxChars — stop at first line break or hard truncate
+    // Boundary found but exceeds maxChars - stop at first line break or hard truncate
     const nlIdx = text.indexOf('\n');
     const crIdx = text.indexOf('\r');
     const lineBreaks = [nlIdx, crIdx].filter((i) => i >= 0);
@@ -579,7 +595,7 @@ export function buildStatusSummary(plan: OrchestrationPlan): string {
 }
 
 // ---------------------------------------------------------------------------
-// Setter helpers — centralised mutation points for settings-menu.ts
+// Setter helpers - centralised mutation points for settings-menu.ts
 // ---------------------------------------------------------------------------
 
 /** Set summarization concurrency with optional range validation (min 0). */
@@ -594,12 +610,18 @@ export function setParallelTasks(value: number): void {
 
 /** Set a timeout value (ms). 0 means no timeout. */
 export function setTimeoutMs(
-    key: "taskTimeoutMs" | "validatorTimeoutMs" | "taskSummaryTimeoutMs",
+    key: "taskTimeoutMs" | "validatorTimeoutMs" | "taskSummaryTimeoutMs" | "subAgentIdleTimeoutMs",
     value: number
 ): void {
     if (key === "taskTimeoutMs") OrchestratorState.taskTimeoutMs = Math.max(0, value);
     else if (key === "validatorTimeoutMs") OrchestratorState.validatorTimeoutMs = Math.max(0, value);
-    else OrchestratorState.taskSummaryTimeoutMs = Math.max(0, value);
+    else if (key === "taskSummaryTimeoutMs") OrchestratorState.taskSummaryTimeoutMs = Math.max(0, value);
+    else OrchestratorState.subAgentIdleTimeoutMs = Math.max(0, value);
+}
+
+/** Set the global max-turns limit for sub-agents. 0 means unlimited. */
+export function setSubAgentMaxTurns(value: number): void {
+    OrchestratorState.subAgentMaxTurns = Math.max(0, value);
 }
 
 /** Toggle a boolean setting on OrchestratorState. */

@@ -2,7 +2,7 @@ import { ModelRef } from "../core/types";
 /**
  * Lightweight model picker for orchestration sub-agent model selection.
  *
- * Adapted from Pi's internal ModelSelectorComponent — stripped down to avoid
+ * Adapted from Pi's internal ModelSelectorComponent - stripped down to avoid
  * the SettingsManager dependency and default-model side effects.
  */
 
@@ -51,7 +51,7 @@ function keyDisplayText(keybinding: string): string {
 }
 
 /**
- * Factory for ctx.ui.custom() — returns a scrollable, searchable model list.
+ * Factory for ctx.ui.custom() - returns a scrollable, searchable model list.
  */
 export function createModelPicker(
     tui: TUI,

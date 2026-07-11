@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // ---------------------------------------------------------------------------
-// Thin facade — preserves the exact same public API for index.ts.
+// Thin facade - preserves the exact same public API for index.ts.
 // All logic is delegated to phase-specific modules under tools/.
 // ---------------------------------------------------------------------------
 

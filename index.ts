@@ -20,6 +20,7 @@ import { registerTools } from "./tools";
 import { registerValidatorTools } from "./tools/validator-tools";
 import { setupUIWidget, setOrchestrationEditor } from "./ui/ui";
 import { applySettingsToState } from "./settings/settings";
+import { formatTimeout } from "./settings/time-utils";
 import * as monitor from "./process/monitor";
 import { setupOrchestratorStatusRenderer } from "./ui/orchestrator-status-entry";
 import {
@@ -64,6 +65,10 @@ export default function (pi: ExtensionAPI) {
     pi.on("session_start", async (_event, ctx) => {
         if (!watchdogTimer) {
             watchdogTimer = setInterval(() => {
+                // --- Sub-agent idle/turns enforcement ---
+                enforceSubAgentLimits();
+
+                // --- Orchestrator stall detection ---
                 // Watchdog: Kick the orchestrator if it stalls during execution mode.
                 const plan = StateManager.loadPlan();
                 if (
@@ -103,7 +108,7 @@ export default function (pi: ExtensionAPI) {
         // Restore persisted model preferences
         applySettingsToState(OrchestratorState);
 
-        // Just notify about an existing plan — don't auto-activate orchestration.
+        // Just notify about an existing plan - don't auto-activate orchestration.
         // The user must explicitly run /om-enable to proceed.
         const plan = StateManager.loadPlan();
         if (plan && plan.status !== "completed") {
@@ -152,7 +157,7 @@ export default function (pi: ExtensionAPI) {
         monitor.resetMonitorState();
         // Reset orchestrator loop detector
         resetLoopState();
-        // Restore default editor when session ends — use the ctx passed to this handler
+        // Restore default editor when session ends - use the ctx passed to this handler
         setOrchestrationEditor(false, ctx);
     });
 
@@ -182,7 +187,7 @@ export default function (pi: ExtensionAPI) {
                 return { systemPrompt: ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT };
             }
 
-            // Planning or idle — focused planning prompt, no standard Pi instructions.
+            // Planning or idle - focused planning prompt, no standard Pi instructions.
             return { systemPrompt: ORCHESTRATOR_PLANNING_SYSTEM_PROMPT };
         }
     });
@@ -207,12 +212,12 @@ export default function (pi: ExtensionAPI) {
 
         if (event.toolName === "orchestrate_write_plan" || event.toolName === "orchestrate_edit_plan") {
             const planContent = StateManager.loadImplementationPlan();
-            // Flag that the plan was just updated — show Accept/Edit dialog on agent_settled.
+            // Flag that the plan was just updated - show Accept/Edit dialog on agent_settled.
             OrchestratorState._planJustUpdated = true;
 
             if (event.toolName === "orchestrate_write_plan") {
                 // Plan is already visible on screen from renderCall streaming + final render.
-                // Don't replace content — just let the existing display stay as-is.
+                // Don't replace content - just let the existing display stay as-is.
                 return;
             }
 
@@ -278,7 +283,7 @@ export default function (pi: ExtensionAPI) {
                 incrementConsecutiveCount();
                 if (getConsecutiveCount() >= ORCHESTRATOR_LOOP_THRESHOLD && !isLoopBreakerFired()) {
                     console.warn(
-                        `[orchestrator] Loop detected — ${getConsecutiveCount()} consecutive identical turns. Sending nudge message.`
+                        `[orchestrator] Loop detected - ${getConsecutiveCount()} consecutive identical turns. Sending nudge message.`
                     );
                     setLoopBreakerFired();
 
@@ -299,7 +304,7 @@ export default function (pi: ExtensionAPI) {
             } else {
                 setLastTurnSignature(signature);
                 resetConsecutiveCount();
-                // Different turn pattern — reset the one-shot flag so we can detect again
+                // Different turn pattern - reset the one-shot flag so we can detect again
                 resetLoopBreakerFlag();
             }
         }
@@ -309,7 +314,7 @@ export default function (pi: ExtensionAPI) {
 
     // Register /om-accept immediately so it appears second (after /om-enable)
     pi.registerCommand("om-accept", {
-        description: "Manually approve and start execution (fallback — dialog normally appears after plan write)",
+        description: "Manually approve and start execution (fallback - dialog normally appears after plan write)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
             startExecutionFromPlan(pi, ctx);
@@ -322,4 +327,47 @@ export default function (pi: ExtensionAPI) {
     // Register TUI-only entry renderer for orchestration status notifications.
     // These appear in the transcript without polluting LLM context window.
     setupOrchestratorStatusRenderer(pi);
+}
+
+// ---------------------------------------------------------------------------
+// Sub-agent idle / max-turns enforcement — runs every 2 s from watchdog timer
+// ---------------------------------------------------------------------------
+
+/**
+ * Enforce global sub-agent limits (idle timeout, max turns) across all
+ * registered agents. Kills the child process via SIGTERM and records the
+ * kill reason so downstream code can report the correct failure message.
+ */
+function enforceSubAgentLimits(): void {
+    const idleMs = OrchestratorState.subAgentIdleTimeoutMs;
+    const maxTurns = OrchestratorState.subAgentMaxTurns;
+
+    if (idleMs === 0 && maxTurns === 0) return; // both disabled — skip entirely
+
+    for (const [agentId, state] of monitor.getAgentStates()) {
+        const child = state.childProcess;
+        if (!child || child.killed) continue;
+
+        // Check idle timeout first.
+        if (idleMs > 0 && state.lastActivityAt !== null) {
+            const elapsedSinceLastActivity = Date.now() - state.lastActivityAt;
+            if (elapsedSinceLastActivity > idleMs) {
+                console.warn(
+                    `[watchdog] Sub-agent ${agentId} idle timeout — no JSON stream activity for ${formatTimeout(idleMs)} (last seen ${(elapsedSinceLastActivity / 1000).toFixed(0)}s ago). Killing.`
+                );
+                child.kill("SIGTERM");
+                state.killedByWatchdog = "idle_timeout";
+                continue; // don't also check max-turns for the same agent
+            }
+        }
+
+        // Check max turns.
+        if (maxTurns > 0 && state.turnCount >= maxTurns) {
+            console.warn(
+                `[watchdog] Sub-agent ${agentId} exceeded max turns limit of ${maxTurns} (at turn ${state.turnCount}). Killing.`
+            );
+            child.kill("SIGTERM");
+            state.killedByWatchdog = "max_turns";
+        }
+    }
 }

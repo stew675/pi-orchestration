@@ -64,11 +64,11 @@ export function registerPlanTools(pi: ExtensionAPI) {
         label: "Present Plan for Review",
         description:
             "Load the existing implementation plan from disk and present it to the user for review. " +
-            "Use this when asked to display an existing plan — do NOT summarize or rewrite it.",
+            "Use this when asked to display an existing plan - do NOT summarize or rewrite it.",
         promptSnippet: "Display the existing implementation plan and trigger the Accept/Edit dialog",
         promptGuidelines: [
             "Call orchestrate_present_plan when instructed by the system to show an existing plan. " +
-                "After calling this, STOP immediately — do not generate any further content.",
+                "After calling this, STOP immediately - do not generate any further content.",
             "Do NOT call this during normal planning; only use it when explicitly requested."
         ],
         parameters: Type.Object({}),
@@ -83,7 +83,7 @@ export function registerPlanTools(pi: ExtensionAPI) {
                 return toolResponse("No implementation plan found on disk.");
             }
 
-            // Flag that the plan was just presented — triggers Accept/Edit dialog on turn_end.
+            // Flag that the plan was just presented - triggers Accept/Edit dialog on turn_end.
             OrchestratorState._planJustUpdated = true;
 
             return toolResponse(`--- Implementation Plan ---\n\n${planContent}`);

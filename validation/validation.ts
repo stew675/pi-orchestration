@@ -17,7 +17,7 @@ export function detectCycle(plan: OrchestrationPlan): string[] | null {
     /**
      * DFS cycle detection helper.
      *
-     * `path` is always a locally-created array (not shared with callers) —
+     * `path` is always a locally-created array (not shared with callers) -
      * in-place splice/push/pop mutations are safe.
      */
     function isCyclic(v: string, path: string[]): boolean {
@@ -61,7 +61,7 @@ export function detectCycle(plan: OrchestrationPlan): string[] | null {
  * If Task A and Task B both modify 'file.ts', one must depend on the other
  * to prevent race conditions during execution.
  *
- * Read-only task types (reviewing, research) do NOT conflict with each other —
+ * Read-only task types (reviewing, research) do NOT conflict with each other -
  * they only read files so parallel access is safe. However a read-only task
  * WILL still conflict against a write-based task touching the same file unless
  * there is a dependency ordering between them.

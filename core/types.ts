@@ -12,6 +12,11 @@ export const DEFAULT_VALIDATOR_TIMEOUT_MS = 240_000;
 /** Default timeout for task-summary sub-agents (2 min). */
 export const DEFAULT_SUMMARY_TIMEOUT_MS = 120_000;
 
+/** Default idle timeout for any sub-agent — no JSON stream activity (5m30s). */
+export const DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS = 330_000;
+/** Default maximum model turns for any sub-agent. */
+export const DEFAULT_SUB_AGENT_MAX_TURNS = 30;
+
 /** Well-known tool grant strings for sub-agent spawning. */
 export const READ_ONLY_TOOLS = "read,ls,find,grep";
 export const FULL_TOOLS = "read,write,bash,edit";
@@ -85,7 +90,7 @@ export interface Task {
 }
 
 // ---------------------------------------------------------------------------
-// Shared sub-agent event interface — used by monitor, capture, loop-detector, runner
+// Shared sub-agent event interface - used by monitor, capture, loop-detector, runner
 // ---------------------------------------------------------------------------
 
 /** Raw JSON events emitted by `pi --mode json` stdout. */

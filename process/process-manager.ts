@@ -61,7 +61,7 @@ export interface SpawnResult {
  * - stderr passthrough to console
  * - configurable timeout → SIGTERM → 5s grace → SIGKILL
  * - automatic tracking in activeProcesses (removed on close/error)
- * - internal capture buffer for failure diagnostics and /om-watch
+ * - internal capture buffer for failure diagnostics and /om-status
  *
  * Logging: extracted plain-text lines are accumulated in memory, then written
  * once to `.pi/orchestration/agent-logs/{taskId}.log` when the process exits.
@@ -108,7 +108,7 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
             capturedRaw.shift();
         }
 
-        // Feed through streaming extractor — accumulate formatted output in memory.
+        // Feed through streaming extractor - accumulate formatted output in memory.
         const extractedLine = formatAndExtract(line);
         if (extractedLine !== null) {
             extractedLines.push(extractedLine);
@@ -157,7 +157,7 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
         cleanup();
     });
 
-    // Watchdog timer — tracks both the initial timeout and the 5s SIGKILL grace
+    // Watchdog timer - tracks both the initial timeout and the 5s SIGKILL grace
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let graceId: ReturnType<typeof setTimeout> | undefined;
     if (timeoutMs) {
@@ -204,7 +204,7 @@ function formatAndExtract(rawLine: string): string | null {
             const role = String(ev.message?.role ?? "");
             if (!["user", "assistant"].includes(role)) return null;
             const text = capture.extractText(ev.message);
-            // extractToolCalls is private in capture.ts — inline the small helper here
+            // extractToolCalls is private in capture.ts - inline the small helper here
             const toolCalls = extractToolCallNames(ev.message);
             if (!text && toolCalls.length === 0) return null;
 

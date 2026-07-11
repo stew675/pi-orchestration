@@ -1,16 +1,18 @@
 import type { ModelRef, Task } from "../core/types";
 import { READ_ONLY_TOOLS, tryParseSubAgentEvent } from "../core/types";
 import { OrchestratorState, getPi } from "../core";
+import * as monitor from "../process/monitor";
 import { StateManager } from "../context/state-manager";
 import { spawnAgent } from "../process/process-manager";
 import { savePlanSafely } from "./utils";
+import { formatTimeout } from "../settings/time-utils";
 
 // ---------------------------------------------------------------------------
-// Pending summaries tracking — allows plan completion to await all in-flight
+// Pending summaries tracking - allows plan completion to await all in-flight
 // summaries before entering final review.
 // ---------------------------------------------------------------------------
 
-/** @internal Tracks in-flight task-summary promises keyed by task ID so plan-completion logic can await them before entering final review. Part of the summarizer's internal concurrency machinery — not for external callers. */
+/** @internal Tracks in-flight task-summary promises keyed by task ID so plan-completion logic can await them before entering final review. Part of the summarizer's internal concurrency machinery - not for external callers. */
 const pendingSummaries = new Map<string, Promise<void>>();
 
 // ---------------------------------------------------------------------------
@@ -30,7 +32,7 @@ function acquireSummarySlot(): Promise<void> {
         activeSummaryCount++;
         return Promise.resolve();
     }
-    // Slot full — queue behind the semaphore
+    // Slot full - queue behind the semaphore
     return new Promise<void>((resolve) => {
         summaryWaitQueue.push(resolve);
     });
@@ -54,7 +56,7 @@ function resetSummarySemaphore(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Public API — lifecycle methods called from executor / scheduler
+// Public API - lifecycle methods called from executor / scheduler
 // ---------------------------------------------------------------------------
 
 /**
@@ -83,7 +85,7 @@ export async function completeTaskWithSummary(task: Task, model?: ModelRef, sess
     const artifactFiles = [...(task.result?.artifacts ?? task.files ?? [])];
 
     if (OrchestratorState.summarizationConcurrency >= 1) {
-        // Async path — gate through the semaphore, then fire and forget
+        // Async path - gate through the semaphore, then fire and forget
         acquireSummarySlot().then(() => {
             if (OrchestratorState.shuttingDown) {
                 releaseSummarySlot();
@@ -97,9 +99,11 @@ export async function completeTaskWithSummary(task: Task, model?: ModelRef, sess
                 sessionTranscript
             ).finally(() => releaseSummarySlot());
             pendingSummaries.set(taskId, summaryPromise);
+        }).catch((err: Error) => {
+            console.error(`[task-summary ${taskId}] Async summary chain error (before spawn):`, err);
         });
     } else {
-        // Synchronous path — await summary inline (original behavior)
+        // Synchronous path - await summary inline (original behavior)
         const taskSummary = await generateTaskSummary(
             {
                 id: taskId,
@@ -137,7 +141,7 @@ export function resetSummarizer(): void {
     summaryWaitQueue.length = 0;
 }
 
-/** @internal Kept for future per-task summary cancellation. Currently unused — use {@link cancelAllSummaries} for shutdown. */
+/** @internal Kept for future per-task summary cancellation. Currently unused - use {@link cancelAllSummaries} for shutdown. */
 export function cancelTaskSummary(taskId: string): void {
     pendingSummaries.delete(taskId);
 }
@@ -188,7 +192,7 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     const p = StateManager.loadPlan();
     if (!p) {
         console.warn(
-            `[task-summary ${taskId}] Plan not found — cannot finalize summary. Task will remain in its current state until the next recovery cycle.`
+            `[task-summary ${taskId}] Plan not found - cannot finalize summary. Task will remain in its current state until the next recovery cycle.`
         );
         return;
     }
@@ -196,7 +200,7 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     const t = p.tasks.find((x) => x.id === taskId);
     if (!t) {
         console.warn(
-            `[task-summary ${taskId}] Task not found in plan — cannot finalize summary. The task may have been removed.`
+            `[task-summary ${taskId}] Task not found in plan - cannot finalize summary. The task may have been removed.`
         );
         return;
     }
@@ -245,7 +249,7 @@ function buildSummaryPrompt(
     }
 
     // Inject session transcript so the summarizer can report verification evidence
-    // (build output, test results, etc.) — critical for the orchestrator's final review.
+    // (build output, test results, etc.) - critical for the orchestrator's final review.
     if (sessionTranscript && sessionTranscript.trim()) {
         summaryContext.push(`\n## Session Transcript (captured sub-agent output)`);
         summaryContext.push(`The following is a condensed log of what the sub-agent did during execution.`);
@@ -253,13 +257,13 @@ function buildSummaryPrompt(
         summaryContext.push(sessionTranscript);
     }
 
-    summaryContext.push(`\n## CRITICAL INSTRUCTIONS — Read Carefully`);
+    summaryContext.push(`\n## CRITICAL INSTRUCTIONS - Read Carefully`);
     summaryContext.push(
         `This summary will be inserted verbatim into the system prompts of downstream tasks that depend on these files. If it is incomplete or vague, those tasks will either call wrong APIs or waste time re-reading entire source files.`
     );
-    summaryContext.push(`Be exhaustive and precise — do not summarize away details a consumer would need.`);
+    summaryContext.push(`Be exhaustive and precise - do not summarize away details a consumer would need.`);
 
-    // Only document the task's own artifacts — never shared headers/dependencies.
+    // Only document the task's own artifacts - never shared headers/dependencies.
     const ownArtifactList = (artifactFiles || []).join(", ");
     summaryContext.push(
         `\n**SCOPE CONSTRAINT**: Document APIs **ONLY from these files: ${ownArtifactList}**. Do NOT include documentation for shared headers, imported modules, or dependency files that you merely read for context. Downstream tasks already receive summaries of their dependencies separately.`
@@ -268,11 +272,11 @@ function buildSummaryPrompt(
     summaryContext.push(`\nProduce your response in exactly THREE sections:`);
 
     summaryContext.push(
-        `1. **What was built** — 1-3 sentences per file describing the purpose and role of each artifact file. Be specific about what problem it solves, not generic descriptions like "utility functions" or "helper module."`
+        `1. **What was built** - 1-3 sentences per file describing the purpose and role of each artifact file. Be specific about what problem it solves, not generic descriptions like "utility functions" or "helper module."`
     );
 
     summaryContext.push(
-        `2. **Public API Surface** — For every code-related file, provide a complete structured listing organized by file name. Under each file header, list ALL of the following (omit categories that don't apply):`
+        `2. **Public API Surface** - For every code-related file, provide a complete structured listing organized by file name. Under each file header, list ALL of the following (omit categories that don't apply):`
     );
     summaryContext.push(
         `   - **Data types / interfaces / structs**: full type signature with all fields and their types (e.g., "interface NoiseConfig { seed: number; octaves: number; persistence: number }")`
@@ -281,24 +285,24 @@ function buildSummaryPrompt(
         `   - **Classes**: constructor signature, public methods with full signatures including parameter names, types, return types, and line numbers (e.g., "SimplexNoise(seed: number)" at line 12, ".noise2D(x: number, y: number): number" at line 89)`
     );
     summaryContext.push(
-        `   - **Functions**: full signature with parameter names, types, return type, and a one-line description of what it does (e.g., "generateNoiseMap(width: number, height: number, config?: NoiseConfig): number[][]" — returns a 2D array of noise values in [-1,+1])`
+        `   - **Functions**: full signature with parameter names, types, return type, and a one-line description of what it does (e.g., "generateNoiseMap(width: number, height: number, config?: NoiseConfig): number[][]" - returns a 2D array of noise values in [-1,+1])`
     );
     summaryContext.push(`   - **Constants / enums**: value and meaning (e.g., "BLOCK_AIR = 0", "DEFAULT_OCTAVES = 4")`);
     summaryContext.push(
-        `   - **Default exports vs named exports** — clearly indicate which is the default export if applicable.`
+        `   - **Default exports vs named exports** - clearly indicate which is the default export if applicable.`
     );
     summaryContext.push(
         `   Include line numbers for every entry. This lets dependent tasks find exactly what they need without scanning files.`
     );
 
     summaryContext.push(
-        `3. **Key design decisions and constraints** — any behavioral details consumers MUST know to use these APIs correctly: return value ranges, mutability guarantees, side effects (e.g., "modifies the input array in-place"), expected preconditions, error conditions, threading/concurrency notes, or conventions (e.g., "block id 0 is always air", "coordinates are integer grid positions").`
+        `3. **Key design decisions and constraints** - any behavioral details consumers MUST know to use these APIs correctly: return value ranges, mutability guarantees, side effects (e.g., "modifies the input array in-place"), expected preconditions, error conditions, threading/concurrency notes, or conventions (e.g., "block id 0 is always air", "coordinates are integer grid positions").`
     );
 
     // Conditional 4th section for build/test/verification tasks
     if (sessionTranscript && sessionTranscript.trim()) {
         summaryContext.push(
-            `4. **Verification Report** — If the task ran any builds, compilations, tests, or verification commands, report exactly what was run and whether it succeeded. Include specific details: which targets were built, how many tests passed/failed, any warnings noted. This helps the Orchestrator decide if additional verification is needed.`
+            `4. **Verification Report** - If the task ran any builds, compilations, tests, or verification commands, report exactly what was run and whether it succeeded. Include specific details: which targets were built, how many tests passed/failed, any warnings noted. This helps the Orchestrator decide if additional verification is needed.`
         );
     }
 
@@ -321,13 +325,13 @@ async function generateTaskSummary(
     if (artifactFiles.length === 0) return null;
 
     const promptContent = buildSummaryPrompt(task.id, task.description, artifactFiles, sessionTranscript);
-    // Persist the summary prompt for debugging — survives process exit.
+    // Persist the summary prompt for debugging - survives process exit.
     StateManager.persistSummaryPrompt(task.id, promptContent);
 
     const maxAttempts = 2;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const result = await runSummaryOnce(task.id, promptContent, model, attempt + 1);
-        // Success — persist response and return.
+        // Success - persist response and return.
         if (result.summary) {
             StateManager.persistSummaryResponse(task.id, result.summary);
             return { summary: result.summary };
@@ -336,7 +340,7 @@ async function generateTaskSummary(
         console.warn(`[task-summary ${task.id}] Attempt ${attempt + 1}/${maxAttempts}: ${result.error}, retrying...`);
     }
 
-    // All attempts exhausted — persist final error.
+    // All attempts exhausted - persist final error.
     const lastError = `Summary generation failed after ${maxAttempts} attempts.`;
     StateManager.persistSummaryError(task.id, lastError);
     return { error: lastError };
@@ -349,6 +353,7 @@ async function runSummaryOnce(
     model?: ModelRef,
     _attempt = 1
 ): Promise<{ summary?: string; error?: string }> {
+    const monitorId = `${taskId}-summary`;
     return await new Promise((resolve) => {
         const args = [
             "--mode",
@@ -364,7 +369,7 @@ async function runSummaryOnce(
         }
         args.push(
             "-p",
-            "Inspect every artifact file with read and produce a complete, detailed summary of all public APIs, data types, and design constraints. Be exhaustive — downstream tasks depend on this."
+            "Inspect every artifact file with read and produce a complete, detailed summary of all public APIs, data types, and design constraints. Be exhaustive - downstream tasks depend on this."
         );
 
         let summaryText: string | undefined;
@@ -373,10 +378,14 @@ async function runSummaryOnce(
             args,
             {
                 timeoutMs: OrchestratorState.taskSummaryTimeoutMs,
-                label: `task-summary ${taskId}`
-                // No taskId — summarizer captures response in memory, doesn't need a log file.
+                label: `task-summary ${taskId}`,
+                taskId: monitorId
             },
             (line) => {
+                // Feed every raw line to the monitor for JSON parsing.
+                // skipActive: true so the summarizer doesn't hijack the /om-status view.
+                monitor.ingestLine(monitorId, line, { skipActive: true });
+
                 const event = tryParseSubAgentEvent(line);
                 if (event && event.type === "message_end" && event.message?.role === "assistant") {
                     for (const part of event.message.content || []) {
@@ -388,8 +397,28 @@ async function runSummaryOnce(
             }
         );
 
+        // Register with the unified monitor so watchdog can enforce idle/turns limits.
+        const taggedId = `summarization-${taskId}`;
+        monitor.registerAgent(taggedId, child);
+
         child.on("close", (code) => {
             clearTimeout();
+            // Don't clear active task - another sub-agent may be running concurrently
+
+            // Check if watchdog killed this agent for idle/turns reasons.
+            const taggedId = `summarization-${taskId}`;
+            const monState = monitor.getMonitoredAgent(taggedId);
+            const killReason = monState?.killedByWatchdog ?? null;
+
+            if (killReason === "idle_timeout") {
+                resolve({ error: `Summary idle timeout — no JSON stream activity for ${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)}.` });
+                return;
+            }
+            if (killReason === "max_turns") {
+                resolve({ error: `Summary exceeded max turns limit of ${OrchestratorState.subAgentMaxTurns}.` });
+                return;
+            }
+
             if (code !== 0 || !summaryText) {
                 const reason =
                     code !== 0
@@ -403,6 +432,7 @@ async function runSummaryOnce(
 
         child.on("error", (err) => {
             clearTimeout();
+            // Don't clear active task - another sub-agent may be running concurrently
             console.warn(`[task-summary ${taskId}] Error: ${err.message}`);
             resolve({ error: err.message });
         });

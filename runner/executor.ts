@@ -14,6 +14,7 @@ import type { SubAgentResult } from "./subagent-spawner";
 import { validateTask } from "./validator";
 import { completeTaskWithSummary } from "./summarizer";
 import { processTaskResult as postProcessTaskResult } from "./post-processor";
+import { formatTimeout } from "../settings/time-utils";
 
 /**
  * Execute a single task. Returns true to continue the loop, false to stop.
@@ -138,7 +139,7 @@ function handleClarification(task: Task, clarificationFile: string): boolean {
 
 /** Handle successful (code 0) sub-agent exit. Routes through validation and summarization. */
 async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, model?: ModelRef): Promise<void> {
-    // Load fresh plan state — always work from the plan's copy of the task
+    // Load fresh plan state - always work from the plan's copy of the task
     const p = StateManager.loadPlan();
     if (!p) return;
     const t = p.tasks.find((x) => x.id === task.id);
@@ -199,7 +200,7 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
         return;
     }
 
-    // Validation failed — check for recoverable cases
+    // Validation failed - check for recoverable cases
     const feedback = validatorResult.feedback || "";
     const isRecoverable =
         procResult.code === 0 &&
@@ -210,7 +211,7 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
 
     if (isRecoverable && !isReadOnly) {
         // Auto-complete with validator note appended to summary
-        console.warn(`[validator ${t.id}] Recoverable failure — auto-completing. Feedback: ${feedback}`);
+        console.warn(`[validator ${t.id}] Recoverable failure - auto-completing. Feedback: ${feedback}`);
         t.validatorFeedback = `Validator noted: ${feedback} (auto-completed; sub-agent exited cleanly)`;
         await completeTaskWithSummary(t, resolveSummaryModel(model), fullTranscript);
     } else {
@@ -290,10 +291,21 @@ async function runTaskSubAgent(
         const output = monitor.getCapturedLines(task.id);
 
         if (procResult.killed) {
+            // Check if the watchdog killed this agent for idle/turns reasons.
+            const taggedId = `implementation-${task.id}`;
+            const monState = monitor.getMonitoredAgent(taggedId);
+            const killReason = monState?.killedByWatchdog ?? null;
+
             t.status = "failed";
-            t.validatorFeedback = procResult.loopKilled
-                ? `Sub-agent killed due to repetitive loop (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`
-                : `Sub-agent timed out after ${task.timeoutMs ?? OrchestratorState.taskTimeoutMs}ms (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
+            if (killReason === "idle_timeout") {
+                t.validatorFeedback = `Sub-agent idle timeout — no JSON stream activity for ${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)} (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
+            } else if (killReason === "max_turns") {
+                t.validatorFeedback = `Sub-agent exceeded max turns limit of ${OrchestratorState.subAgentMaxTurns} (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
+            } else if (procResult.loopKilled) {
+                t.validatorFeedback = `Sub-agent killed due to repetitive loop (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
+            } else {
+                t.validatorFeedback = `Sub-agent timed out after ${task.timeoutMs ?? OrchestratorState.taskTimeoutMs}ms (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
+            }
             savePlanSafely(p);
             return;
         }

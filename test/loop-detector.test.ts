@@ -24,7 +24,7 @@ function makeMessageEnd(role: string = "assistant"): SubAgentEvent {
 }
 
 // ---------------------------------------------------------------------------
-// LoopDetector — basic behavior
+// LoopDetector - basic behavior
 // ---------------------------------------------------------------------------
 
 describe("LoopDetector", () => {
@@ -107,7 +107,7 @@ describe("LoopDetector", () => {
         };
         const detector = new LoopDetector(opts);
 
-        // 15 cycles of [tool_call, tool_result] — tool_result produces no signature
+        // 15 cycles of [tool_call, tool_result] - tool_result produces no signature
         // So only 15 tool_call signatures accumulate → cycleLen=1 fires after buffer reaches 15
         for (let i = 0; i < MIN_BUFFER_SIZE; i++) {
             detector.ingest(makeToolCall("read", { path: "foo.ts" }));
@@ -173,7 +173,7 @@ describe("LoopDetector", () => {
     it("handles unknown event types gracefully (no crash)", () => {
         const opts: LoopDetectorOptions = { onLoopDetected: () => {} };
         const detector = new LoopDetector(opts);
-        // No crash — produces empty signature, silently skipped
+        // No crash - produces empty signature, silently skipped
         for (let i = 0; i < 50; i++) {
             detector.ingest({ type: "unknown_event" });
         }
@@ -189,7 +189,7 @@ describe("LoopDetector", () => {
         };
         const detector = new LoopDetector(opts);
 
-        // Alternate between two paths — forms a cycle of length 2
+        // Alternate between two paths - forms a cycle of length 2
         // Need ≥ MIN_BUFFER_SIZE entries → 16 individual events (8 pairs), cycles=8 ≥ 5 required
         for (let i = 0; i < 16; i++) {
             detector.ingest(makeToolCall("read", { path: i % 2 === 0 ? "a.ts" : "b.ts" }));
@@ -248,7 +248,7 @@ describe("LoopDetector", () => {
         // One different event breaks the streak
         detector.ingest(makeToolCall("read", { path: "bar.ts" }));
 
-        // 15 more identical events — buffer now has enough consecutive identical entries after trim
+        // 15 more identical events - buffer now has enough consecutive identical entries after trim
         for (let i = 0; i < MIN_BUFFER_SIZE; i++) {
             detector.ingest(makeToolCall("read", { path: "foo.ts" }));
         }
@@ -265,7 +265,7 @@ describe("LoopDetector", () => {
         };
         const detector = new LoopDetector(opts);
 
-        // Alternate between assistant and user messages — cycle of length 2 with many reps → fires
+        // Alternate between assistant and user messages - cycle of length 2 with many reps → fires
         for (let i = 0; i < 16; i++) {
             // 16 entries ≥ MIN_BUFFER_SIZE, floor(16/2)=8 ≥ 5 required
             detector.ingest(makeMessageEnd(i % 2 === 0 ? "assistant" : "user"));

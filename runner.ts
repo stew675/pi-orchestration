@@ -8,7 +8,7 @@ export { activeProcesses };
 export { notifyOrchestrator } from "./runner/utils";
 
 // ---------------------------------------------------------------------------
-// Thin facade — preserves the exact same public API for external callers.
+// Thin facade - preserves the exact same public API for external callers.
 // All logic is delegated to phase-specific modules under runner/.
 // ---------------------------------------------------------------------------
 

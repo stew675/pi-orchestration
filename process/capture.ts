@@ -39,7 +39,7 @@ function formatLine(raw: string): string | null {
             if (role === "user") {
                 line = `[prompt] ${truncateText(text, MAX_DIAGNOSTIC_MESSAGE_LEN)}`;
             } else {
-                // Assistant message — include text and tool call hints
+                // Assistant message - include text and tool call hints
                 const parts: string[] = [];
                 if (text) parts.push(truncateText(text, MAX_DIAGNOSTIC_MESSAGE_LEN));
                 if (toolCalls.length > 0) {
