@@ -1,12 +1,27 @@
 # Pi Orchestration Extension
 
-Multi-agent task orchestration with planning, execution, validation, and user-in-the-loop clarification.
+A goal-based multi-agent task orchestration system with planning, execution, validation, and user-in-the-loop clarification.
 
-## Why
+## Summary
 
-For complex, multi-step goals (refactoring, migrations, large features), a single agent turn can't hold the full context.
+Intended for complex, goal-based fire-and-forget LLM driven multi-step goals (refactoring, migrations, large features) where a model can't hold the full context.
 
-This extension spawns an **Orchestrator** LLM that decomposes your goal into tasks, then delegates each task to independent sub-agents with explicit tool permissions and focused context.
+This extension spawns an **Orchestration** LLM that decomposes your goal into tasks, then delegates each task to independent sub-agents with explicit tool permissions and focused context.
+
+## How To Install
+
+Installation is easy.  Just clone this repository wherever you want it to be, and then create a symlink from the repository directory to your Pi Agent Extensions directory (typically `~/.pi/agent/extensions/`
+
+For example:
+```
+# Example of clone repository into ~/src in your home directory
+mkdir -p ~/src && cd ~/src
+git clone https://github.com/stew675/pi-orchestration
+
+# Link the cloned repository as a Pi Agent Extension
+mkdir -p ~/.pi/agent/extensions
+ln -s ~/src/pi-orchestration ~/.pi/agent/extensions/orchestration
+```
 
 ## Features
 
@@ -35,27 +50,49 @@ This extension spawns an **Orchestrator** LLM that decomposes your goal into tas
 |---------|-------------|
 | `/om-enable` | Toggle orchestration mode on/off (with confirmation) |
 | `/om-plan` | Toggle planning mode on/off (build/edit implementation plan) |
-| `/om-status` | Open a live-updating Markdown overlay of the current plan + sub-agent live-stream |
-| `/om-settings` | Open settings overlay (task model, validator model, summarization concurrency, sub-agent timeouts). Also supports CLI subcommands: `/om-settings orchestration <provider/model>`, `/om-settings planning <provider/model>`, `/om-settings simple-task <provider/model>`, `/om-settings complex-task <provider/model>`, `/om-settings validator <provider/model>`, `/om-settings summary <provider/model>`, or `/om-settings default` to reset |
+| `/om-status` | Live-updating overlay of the task list + sub-agent live-stream |
+| `/om-settings` | Open settings overlay |
 | `/om-accept` | Approve the plan and begin execution |
-| `/om-pause` | Gracefully halt execution. Lets the current task finish, then stops (no process killing) |
-| `/om-resume` | Resume from last known state (handles all states: executing, paused, reviewing, failed) |
-| `/om-stop` | Immediately kill active sub-agents and mark plan as paused (preserves state for later resume) |
+| `/om-pause` | Gracefully halts execution. Lets the current task finish, then stops |
+| `/om-stop` | Immediately kill active sub-agents and pauses |
+| `/om-resume` | Resume from last known state (handles all states) |
 | `/om-reset` | Clear current progress entirely and start fresh |
 
-## Usage
+## Available Settings
+
+| Setting | Description |
+|---------|-------------|
+| `planning model` | LLM model to use for building implementation plans |
+| `orchestration model` | LLM model to use for orchestrating tasks |
+| `simple task model` | LLM model to use for simple tasks |
+| `complex task model` | LLM model to use for complex tasks |
+| `validation model` | LLM model to use for task validation |
+| `summarization model` | LLM model to use for summarizing tasks |
+| `summarization concurrency` | Maximum parallel summaries permitted |
+| `parallel tasks` | maximum concurrent simple/complex tasks |
+| `allow orchestrator stop` | Allows orchestrator to stop on severe issues |
+| `Validate Simple Tasks` | Whether to use validation on simple tasks |
+| `Validate Complex Tasks` | Whether to use validation on complex tasks |
+| `Reset Defaults` | Reset settings to default |
+
+
+## Work Flow OverView
 
 1. Enable orchestration: `/om-enable` (automatically enters planning mode)
 2. Describe your goal (e.g., *"Refactor the auth module to use JWT instead of session cookies"*)
-3. The Orchestrator builds an implementation plan using `orchestrate_write_plan` / `orchestrate_edit_plan`, producing an `implementation-plan.md` you review with the Accept/Edit dialog
-4. Once approved (`/om-accept`), the Orchestrator decomposes the plan into tasks using `orchestrate_add_task()` and begins execution
-5. Inspect progress with `/om-status` or the TUI widget above the editor
-6. To re-enter planning mode after completion or pause/stop: `/om-plan`
-7. When ready, approve and start execution: `/om-accept`
-8. If a task needs clarification, you'll be prompted to provide an answer and resume with `/om-resume`
-9. When all tasks complete, the Orchestrator performs a final review
+3. The Orchestrator builds an implementation plan for you
+4. Either accept the plan, or describe changes, or modify it directly on disk
+5. Once approved (`/om-accept`), the Orchestrator decomposes the plan into phase based tasks begins execution
+6. Inspect ongoing progress with `/om-status`
+7. To re-enter planning mode after completion or pause/stop: `/om-plan`
+8. When ready, approve and start execution: `/om-accept`
+9. If a task needs clarification, you'll be prompted to provide an answer and resume with `/om-resume`
+10. When all tasks complete, the Orchestrator performs a final review
+
 
 ## Plan Structure
+
+The orchestrator will create the `.pi/orchstration/` directory in your project directory where it manages its state
 
 ```
 .pi/orchestration/
@@ -72,11 +109,10 @@ This extension spawns an **Orchestrator** LLM that decomposes your goal into tas
 └── agent-logs/              ← Raw sub-agent transcript logs (.log)
 ```
 
-> **Migration**: Existing projects with plan files at the root level (`.pi/orchestration/plan.json`, etc.) are supported automatically — they load from legacy locations on first run and migrate to `plans/` on next save.
 
 ### Task Schema
 
-**Tasks** form a flat graph with dependencies.
+**Tasks** form a flat graph with dependencies encoded as JSON
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -96,7 +132,8 @@ This extension spawns an **Orchestrator** LLM that decomposes your goal into tas
 
 When a task completes, its prompt file is moved from `tasks/` to `archive/` alongside the result JSON. This lets you inspect exactly what context was given to each sub-agent.
 
-## How It Works
+
+## How It All Works
 
 ### Planning Phase
 - The Orchestrator receives your goal and uses `orchestrate_write_plan` / `orchestrate_edit_plan` to build an `implementation-plan.md` on disk.
@@ -161,6 +198,9 @@ Plan state persists in `.pi/orchestration/plans/plan.json` with crash-resilient 
 - Execution state → prompts to resume; interrupted tasks auto-reset to `pending`
 - Paused/clarification → shows what's waiting
 - Reviewing → wakes the reviewer on resume
+
+### Final Verification
+When all tasks are completed the orchestration model will perform one final assessment before approving the goal.  It may create remedial tasks to correct issues where the project has not met the goal.
 
 ### Configurable Timeouts
 All sub-agent watchdog timeouts are configurable via `/om-settings` (TUI) or by editing `settings.json`. Three independent timers control different phases:
