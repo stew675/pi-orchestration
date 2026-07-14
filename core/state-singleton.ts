@@ -47,8 +47,6 @@ export const OrchestratorState = {
     shouldResetContext: false,
     /** One-shot flag: plan was just written/edited by the agent - show Accept/Edit dialog on next turn_end. */
     _planJustUpdated: false,
-    /** One-shot flag: planning entry hint sent (exploration guidance). Fires once per planning session. */
-    _planningEntryHintSent: false,
     /** One-shot flag: pre-write quality hint sent. Fires once on first orchestrate_write_plan call. */
     _preWriteHintSent: false,
     /** Set to true when user explicitly pauses/stops. Disables the watchdog. */
@@ -156,7 +154,6 @@ const STATE_DEFAULTS = {
     pendingSystemPromptRestore: false,
     shouldResetContext: false,
     _planJustUpdated: false,
-    _planningEntryHintSent: false,
     _preWriteHintSent: false,
     _manualPause: false,
     _pauseReason: null as "pause" | "stop" | null,

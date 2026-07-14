@@ -41,7 +41,7 @@ export function registerPlanTools(pi: ExtensionAPI) {
         label: "Edit Plan File",
         description:
             "Surgically edit the implementation plan file. Provide the exact text to replace and its replacement. No path needed.\n" +
-            "When editing, search and update ALL relevant sections to enact every requested change — don't just patch one spot.",,
+            "When editing, search and update ALL relevant sections to enact every requested change — don't just patch one spot.",
         promptSnippet: "Edit a section of the implementation plan",
         promptGuidelines: [
             "Use orchestrate_edit_plan for surgical updates to an existing plan.",

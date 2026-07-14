@@ -209,7 +209,6 @@ async function enterPlanningWithCleanContext(pi: ExtensionAPI, ctx: ExtensionCon
     setOrchestrationMode(true, false, true, pi, refreshBorder);
     OrchestratorState.shouldResetContext = true;
     // Reset planning hint one-shot flags for a fresh session
-    OrchestratorState._planningEntryHintSent = false;
     OrchestratorState._preWriteHintSent = false;
     await enterPlanningMode(pi, ctx);
 }
@@ -403,7 +402,6 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     OrchestratorState._manualPause = false;
     OrchestratorState._pauseReason = null;
     // Clear planning hint flags — no longer in planning
-    OrchestratorState._planningEntryHintSent = false;
     OrchestratorState._preWriteHintSent = false;
 
     setOrchestrationMode(OrchestratorState.isActive, true, false, pi, refreshBorder);
@@ -572,12 +570,23 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             setOrchestrationMode(OrchestratorState.isActive, false, true, pi, refreshBorder);
             OrchestratorState.shouldResetContext = true;
             // Reset planning hint one-shot flags
-            OrchestratorState._planningEntryHintSent = false;
             OrchestratorState._preWriteHintSent = false;
             await enterPlanningMode(pi, ctx);
             ctx.ui.notify(
                 "Planning mode enabled with a clean context. Discuss your goal with the orchestrator to build an implementation plan.",
                 "info"
+            );
+            // Wake up the planner so it's in its proper conversational state
+            // (waiting for user input) rather than sitting idle after context reset.
+            pi.sendMessage(
+                {
+                    customType: "orchestrator_event",
+                    content:
+                        "System: Planning mode is active with a clean context. " +
+                        "Wait for the user to provide their goal or requirements, then explore and build an implementation plan.",
+                    display: false
+                },
+                { triggerTurn: true }
             );
         }
     });

@@ -41,7 +41,7 @@ import {
 } from "./process/loop-detector";
 
 import { ORCHESTRATOR_PLANNING_SYSTEM_PROMPT, ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT,
-    PLANNING_HINT_ENTRY, PLANNING_HINT_PRE_WRITE } from "./context/prompts";
+    PLANNING_HINT_PRE_WRITE } from "./context/prompts";
 
 /** Watchdog timer interval (ms) — checks for stalled orchestrator every 2 seconds during execution. */
 const WATCHDOG_INTERVAL_MS = 2000;
@@ -189,13 +189,6 @@ export default function (pi: ExtensionAPI) {
             }
 
             // Planning or idle - focused planning prompt, no standard Pi instructions.
-            if (OrchestratorState.planningMode && !OrchestratorState._planningEntryHintSent) {
-                OrchestratorState._planningEntryHintSent = true;
-                return {
-                    systemPrompt: ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
-                    message: { customType: "orchestrator_event", content: PLANNING_HINT_ENTRY, display: false }
-                };
-            }
             return { systemPrompt: ORCHESTRATOR_PLANNING_SYSTEM_PROMPT };
         }
     });
