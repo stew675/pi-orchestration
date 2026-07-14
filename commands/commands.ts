@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StateManager } from "../context/state-manager";
+import { PLANNING_HINT_EDIT } from "../context/prompts";
 import { killAllProcesses } from "../process/process-manager";
 import { buildFinalReviewMessage } from "../runner/utils";
 import { Runner } from "../runner";
@@ -207,6 +208,9 @@ async function enterPlanningWithCleanContext(pi: ExtensionAPI, ctx: ExtensionCon
     await enterOrchestrationMode(pi, ctx);
     setOrchestrationMode(true, false, true, pi, refreshBorder);
     OrchestratorState.shouldResetContext = true;
+    // Reset planning hint one-shot flags for a fresh session
+    OrchestratorState._planningEntryHintSent = false;
+    OrchestratorState._preWriteHintSent = false;
     await enterPlanningMode(pi, ctx);
 }
 
@@ -398,6 +402,9 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     OrchestratorState.shouldResetContext = true;
     OrchestratorState._manualPause = false;
     OrchestratorState._pauseReason = null;
+    // Clear planning hint flags — no longer in planning
+    OrchestratorState._planningEntryHintSent = false;
+    OrchestratorState._preWriteHintSent = false;
 
     setOrchestrationMode(OrchestratorState.isActive, true, false, pi, refreshBorder);
 
@@ -483,11 +490,12 @@ export async function showAcceptOrEditDialog(pi: ExtensionAPI, ctx: ExtensionCon
         startExecutionFromPlan(pi, ctx);
     } else if (result.feedback && result.feedback.trim()) {
         /* Send user feedback back to the agent so it can refine the plan.
+         * Prepended with PLANNING_HINT_EDIT for thoroughness guidance-in-the-moment.
          * display: false avoids the [undefined] source label since the user's input
          * is already visible in the Accept/Edit dialog itself. */
         pi.sendMessage(
             {
-                content: `Please update the implementation plan based on this feedback:\n\n${result.feedback}`,
+                content: `${PLANNING_HINT_EDIT}\n\n${result.feedback}`,
                 customType: "user_feedback",
                 display: false
             },
@@ -563,6 +571,9 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
             setOrchestrationMode(OrchestratorState.isActive, false, true, pi, refreshBorder);
             OrchestratorState.shouldResetContext = true;
+            // Reset planning hint one-shot flags
+            OrchestratorState._planningEntryHintSent = false;
+            OrchestratorState._preWriteHintSent = false;
             await enterPlanningMode(pi, ctx);
             ctx.ui.notify(
                 "Planning mode enabled with a clean context. Discuss your goal with the orchestrator to build an implementation plan.",

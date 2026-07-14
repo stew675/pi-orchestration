@@ -40,7 +40,8 @@ import {
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
 
-import { ORCHESTRATOR_PLANNING_SYSTEM_PROMPT, ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT } from "./context/prompts";
+import { ORCHESTRATOR_PLANNING_SYSTEM_PROMPT, ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT,
+    PLANNING_HINT_ENTRY, PLANNING_HINT_PRE_WRITE } from "./context/prompts";
 
 /** Watchdog timer interval (ms) — checks for stalled orchestrator every 2 seconds during execution. */
 const WATCHDOG_INTERVAL_MS = 2000;
@@ -188,6 +189,13 @@ export default function (pi: ExtensionAPI) {
             }
 
             // Planning or idle - focused planning prompt, no standard Pi instructions.
+            if (OrchestratorState.planningMode && !OrchestratorState._planningEntryHintSent) {
+                OrchestratorState._planningEntryHintSent = true;
+                return {
+                    systemPrompt: ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
+                    message: { customType: "orchestrator_event", content: PLANNING_HINT_ENTRY, display: false }
+                };
+            }
             return { systemPrompt: ORCHESTRATOR_PLANNING_SYSTEM_PROMPT };
         }
     });
@@ -206,7 +214,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     /** Intercept planning tool results and replace them with the full plan from disk.
-     *  This ensures the user always sees the canonical plan file, not a model-generated summary. */
+     *  Also injects contextual hints at key moments for guidance-in-the-moment pattern. */
     pi.on("tool_result", async (event) => {
         if (!OrchestratorState.isActive || !OrchestratorState.planningMode || event.isError) return;
 
@@ -216,6 +224,14 @@ export default function (pi: ExtensionAPI) {
             OrchestratorState._planJustUpdated = true;
 
             if (event.toolName === "orchestrate_write_plan") {
+                // Inject pre-write quality hint on first call (one-shot).
+                if (!OrchestratorState._preWriteHintSent) {
+                    OrchestratorState._preWriteHintSent = true;
+                    pi.sendMessage(
+                        { customType: "orchestrator_event", content: PLANNING_HINT_PRE_WRITE, display: false },
+                        { deliverAs: "nextTurn" }
+                    );
+                }
                 // Plan is already visible on screen from renderCall streaming + final render.
                 // Don't replace content - just let the existing display stay as-is.
                 return;

@@ -15,7 +15,8 @@ export function registerPlanTools(pi: ExtensionAPI) {
         name: "orchestrate_write_plan",
         label: "Write Plan File",
         description:
-            "Create or overwrite the implementation plan file (.pi/orchestration/plans/implementation-plan.md). Use this during planning to persist your current plan. No path needed.",
+            "Create or overwrite the implementation plan file (.pi/orchestration/plans/implementation-plan.md). Use this during planning to persist your current plan. No path needed.\n" +
+            "Plan quality: be detailed with file paths, line number ranges, and function names. Refer to sections as 'Phase' (not 'Task'). Provide concrete examples of what to change or add.",
         promptSnippet: "Write the full implementation plan to disk",
         promptGuidelines: [
             "Use orchestrate_write_plan to create or update the implementation plan file.",
@@ -39,7 +40,8 @@ export function registerPlanTools(pi: ExtensionAPI) {
         name: "orchestrate_edit_plan",
         label: "Edit Plan File",
         description:
-            "Surgically edit the implementation plan file. Provide the exact text to replace and its replacement. No path needed.",
+            "Surgically edit the implementation plan file. Provide the exact text to replace and its replacement. No path needed.\n" +
+            "When editing, search and update ALL relevant sections to enact every requested change — don't just patch one spot.",,
         promptSnippet: "Edit a section of the implementation plan",
         promptGuidelines: [
             "Use orchestrate_edit_plan for surgical updates to an existing plan.",
