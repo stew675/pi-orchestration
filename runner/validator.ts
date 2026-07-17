@@ -18,6 +18,33 @@ const FEEDBACK_PROCESS_ERROR_PREFIX = "Validator process error: ";
 const VALIDATOR_MAX_ATTEMPTS = 2;
 
 /**
+ * Fallback regex-based verdict parser on the text output of the validator,
+ * used when the model fails to invoke the validate pass/fail tools.
+ */
+function parseSemanticVerdict(text: string): "pass" | "fail" | null {
+    const lines = text.split("\n").map((l) => l.trim().toUpperCase());
+
+    for (const line of lines) {
+        if (line.includes("VERDICT: PASS") || line.includes("VALIDATION: PASS") || line.includes("VERDICT: SUCCESS")) {
+            return "pass";
+        }
+        if (line.includes("VERDICT: FAIL") || line.includes("VALIDATION: FAIL") || line.includes("VERDICT: FAILURE")) {
+            return "fail";
+        }
+    }
+
+    const textUpper = text.toUpperCase();
+    if (textUpper.includes("VALIDATION PASS") || textUpper.includes("VERDICT IS PASS")) {
+        return "pass";
+    }
+    if (textUpper.includes("VALIDATION FAIL") || textUpper.includes("VERDICT IS FAIL")) {
+        return "fail";
+    }
+
+    return null;
+}
+
+/**
  * Validate a task by spawning validator sub-agent(s) with retry on non-verdict.
  *
  * The validator is given two tools: orchestrate_validate_pass and
@@ -151,6 +178,19 @@ async function runValidatorOnce(
             if (child.killed) {
                 resolve({ pass: false, feedback: FEEDBACK_TIMEOUT });
                 return;
+            }
+
+            // Fallback semantic verdict check on clean exit
+            if (lastAssistantText) {
+                const semanticVerdict = parseSemanticVerdict(lastAssistantText);
+                if (semanticVerdict === "pass") {
+                    resolve({ pass: true, feedback: "" });
+                    return;
+                }
+                if (semanticVerdict === "fail") {
+                    resolve({ pass: false, feedback: lastAssistantText });
+                    return;
+                }
             }
 
             // Process exited cleanly but no validate tool was called.
