@@ -53,6 +53,8 @@ export interface SpawnResult {
     clearTimeout: () => void;
     /** Captured output as formatted plain-text lines (populated during execution). */
     capturedLines: CaptureAccessor;
+    /** Captured raw stderr lines for diagnostics in case of failures. */
+    getStderrDiagnostics: () => string;
 }
 
 /**
@@ -94,8 +96,20 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
     const cleanup = () => activeProcesses.delete(child);
     child.on("close", cleanup);
 
+    const rawStderrLines: string[] = [];
     child.stderr.on("data", (data) => {
-        console.error(`[${label}] ${data.toString().trim()}`);
+        const str = data.toString();
+        console.error(`[${label}] ${str.trim()}`);
+
+        const lines = str.split("\n");
+        for (const line of lines) {
+            if (line.trim()) {
+                rawStderrLines.push(line.trim());
+                if (rawStderrLines.length > 50) {
+                    rawStderrLines.shift();
+                }
+            }
+        }
     });
 
     let buffer = "";
@@ -184,7 +198,8 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
             if (timeoutId) clearTimeout(timeoutId);
             if (graceId) clearTimeout(graceId);
         },
-        capturedLines: () => capture.formatCapturedLines(capturedRaw)
+        capturedLines: () => capture.formatCapturedLines(capturedRaw),
+        getStderrDiagnostics: () => rawStderrLines.join("\n")
     };
 }
 

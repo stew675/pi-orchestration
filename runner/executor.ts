@@ -312,7 +312,14 @@ async function runTaskSubAgent(
 
         if (procResult.code !== 0) {
             t.status = "failed";
-            t.validatorFeedback = `Sub-agent process exited with code ${procResult.code} (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
+            let feedback = `Sub-agent process exited with code ${procResult.code} (ran for ${elapsedStr})`;
+            if (procResult.stderrDiagnostics) {
+                feedback += `\n\n[Raw Stderr Output]:\n${procResult.stderrDiagnostics}`;
+            }
+            if (output) {
+                feedback += `\n\n[Captured Events]:\n${output}`;
+            }
+            t.validatorFeedback = feedback;
             savePlanSafely(p);
             return;
         }

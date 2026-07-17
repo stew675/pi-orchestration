@@ -29,6 +29,8 @@ export interface SubAgentResult {
     spawnError?: Error;
     /** Path to the extracted transcript log file (under .pi/orchestration/agent-logs/). */
     logFile?: string;
+    /** Captured stderr diagnostics. */
+    stderrDiagnostics?: string;
 }
 
 /** Options for spawning a sub-agent process. */
@@ -75,6 +77,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
         let child: ChildProcess;
         let clearTimeout: () => void;
         let capturedLines: () => string[];
+        let getStderrDiagnostics: () => string;
 
         try {
             const spawnRes = spawnAgent(
@@ -122,6 +125,7 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
             child = spawnRes.child;
             clearTimeout = spawnRes.clearTimeout;
             capturedLines = spawnRes.capturedLines;
+            getStderrDiagnostics = spawnRes.getStderrDiagnostics;
         } catch (err: any) {
             resolve({
                 code: null,
@@ -157,7 +161,8 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
                 receivedAssistantMessage,
                 loopKilled,
                 killed: child.killed,
-                logFile
+                logFile,
+                stderrDiagnostics: getStderrDiagnostics ? getStderrDiagnostics() : undefined
             });
         });
 
@@ -170,7 +175,8 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
                 loopKilled: false,
                 killed: child.killed,
                 spawnError: err,
-                logFile
+                logFile,
+                stderrDiagnostics: getStderrDiagnostics ? getStderrDiagnostics() : undefined
             });
         });
     });
