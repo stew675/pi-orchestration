@@ -5,7 +5,9 @@ import {
     detectFileConflicts,
     detectOversizedTasks,
     formatFileConflictError,
-    getDependents
+    getDependents,
+    healDependenciesOnDelete,
+    autoHealFileConflicts
 } from "../validation/validation";
 
 // ---------------------------------------------------------------------------
@@ -324,5 +326,88 @@ describe("getDependents", () => {
     it("returns empty array for empty plan", () => {
         const plan = makePlan([]);
         expect(getDependents(plan, "A")).toEqual([]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// healDependenciesOnDelete
+// ---------------------------------------------------------------------------
+
+describe("healDependenciesOnDelete", () => {
+    it("performs transitive dependency bypass on simple deletion", () => {
+        // X -> A -> B. Delete A without replacements. B should inherit X.
+        const plan = makePlan([
+            { id: "X" },
+            { id: "A", dependencies: ["X"] },
+            { id: "B", dependencies: ["A"] }
+        ]);
+
+        healDependenciesOnDelete(plan.tasks, "A", []);
+        
+        const taskB = plan.tasks.find(t => t.id === "B");
+        expect(taskB).toBeDefined();
+        expect(taskB!.dependencies).toEqual(["X"]);
+    });
+
+    it("performs replacement-aware dependency transfer", () => {
+        // A -> B. Add A_new as replacement for A. B should depend on A_new.
+        const plan = makePlan([
+            { id: "A" },
+            { id: "B", dependencies: ["A"] }
+        ]);
+
+        healDependenciesOnDelete(plan.tasks, "A", ["A_new"]);
+
+        const taskB = plan.tasks.find(t => t.id === "B");
+        expect(taskB).toBeDefined();
+        expect(taskB!.dependencies).toEqual(["A_new"]);
+    });
+
+    it("performs split task transfer (1-to-many replacement)", () => {
+        // A -> B. A split into A_1 and A_2. B should depend on both.
+        const plan = makePlan([
+            { id: "A" },
+            { id: "B", dependencies: ["A"] }
+        ]);
+
+        healDependenciesOnDelete(plan.tasks, "A", ["A_1", "A_2"]);
+
+        const taskB = plan.tasks.find(t => t.id === "B");
+        expect(taskB).toBeDefined();
+        expect(taskB!.dependencies).toContain("A_1");
+        expect(taskB!.dependencies).toContain("A_2");
+        expect(taskB!.dependencies.length).toBe(2);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// autoHealFileConflicts
+// ---------------------------------------------------------------------------
+
+describe("autoHealFileConflicts", () => {
+    it("automatically heals file conflict between two write-based tasks by adding a dependency edge based on array index order", () => {
+        const plan = makePlan([
+            { id: "A", files: ["src/foo.ts"] },
+            { id: "B", files: ["src/foo.ts"] }
+        ]);
+
+        autoHealFileConflicts(plan.tasks);
+
+        const taskB = plan.tasks.find(t => t.id === "B");
+        expect(taskB).toBeDefined();
+        expect(taskB!.dependencies).toEqual(["A"]);
+    });
+
+    it("does not inject dependency between two read-only tasks sharing a file", () => {
+        const plan = makePlan([
+            { id: "A", taskType: "reviewing", files: ["src/foo.ts"] },
+            { id: "B", taskType: "research", files: ["src/foo.ts"] }
+        ]);
+
+        autoHealFileConflicts(plan.tasks);
+
+        const taskB = plan.tasks.find(t => t.id === "B");
+        expect(taskB).toBeDefined();
+        expect(taskB!.dependencies).toEqual([]);
     });
 });
