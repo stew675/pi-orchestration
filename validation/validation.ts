@@ -243,3 +243,128 @@ export function getDependents(plan: OrchestrationPlan, taskId: string): string[]
     }
     return dependents;
 }
+
+/**
+ * Heal dependencies of tasks when a task is deleted or replaced.
+ * - If replacementTaskIds is specified: dependent tasks of deletedTaskId will depend on ALL replacementTaskIds.
+ * - If replacementTaskIds is empty: dependent tasks of deletedTaskId will inherit deletedTaskId's dependencies.
+ */
+export function healDependenciesOnDelete(
+    tasks: Task[],
+    deletedTaskId: string,
+    replacementTaskIds: string[] = []
+): void {
+    const deletedTask = tasks.find((t) => t.id === deletedTaskId);
+    if (!deletedTask) return;
+
+    const deletedTaskDeps = deletedTask.dependencies || [];
+
+    for (const task of tasks) {
+        if (task.id === deletedTaskId) continue;
+        const deps = task.dependencies || [];
+
+        if (deps.includes(deletedTaskId)) {
+            // Remove the deleted task from the dependents list
+            task.dependencies = deps.filter((id) => id !== deletedTaskId);
+
+            if (replacementTaskIds.length > 0) {
+                // Transfer dependency to replacement task(s)
+                for (const repId of replacementTaskIds) {
+                    if (!task.dependencies.includes(repId)) {
+                        task.dependencies.push(repId);
+                    }
+                }
+            } else {
+                // Transitive Dependency Bypass (inherit parent's dependencies)
+                for (const depId of deletedTaskDeps) {
+                    if (!task.dependencies.includes(depId)) {
+                        task.dependencies.push(depId);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Scans active tasks for file conflict gaps (i.e. modifying the same file without a dependency path)
+ * and automatically injects dependency edges to heal the race condition (preserves order based on task array indices).
+ */
+export function autoHealFileConflicts(tasks: Task[]): void {
+    const ancestors = new Map<string, Set<string>>();
+    const tasksMap = new Map<string, Task>();
+    const isReadOnlyByTask = new Map<string, boolean>();
+
+    for (const t of tasks) {
+        tasksMap.set(t.id, t);
+        isReadOnlyByTask.set(t.id, isTaskReadOnly(t.taskType ?? "other"));
+    }
+
+    function getAncestors(taskId: string): Set<string> {
+        if (ancestors.has(taskId)) return ancestors.get(taskId)!;
+        const set = new Set<string>();
+        const task = tasksMap.get(taskId);
+        if (task && task.dependencies) {
+            for (const depId of task.dependencies) {
+                set.add(depId);
+                for (const grandDep of getAncestors(depId)) {
+                    set.add(grandDep);
+                }
+            }
+        }
+        ancestors.set(taskId, set);
+        return set;
+    }
+
+    for (const t of tasks) {
+        getAncestors(t.id);
+    }
+
+    const fileToTasks = new Map<string, string[]>();
+    for (const t of tasks) {
+        if (!t.files) continue;
+        for (const file of t.files) {
+            if (!fileToTasks.has(file)) {
+                fileToTasks.set(file, []);
+            }
+            fileToTasks.get(file)!.push(t.id);
+        }
+    }
+
+    for (const [file, fileTaskIds] of fileToTasks.entries()) {
+        if (fileTaskIds.length < 2) continue;
+
+        for (let i = 0; i < fileTaskIds.length; i++) {
+            for (let j = i + 1; j < fileTaskIds.length; j++) {
+                const a = fileTaskIds[i];
+                const b = fileTaskIds[j];
+
+                if (isReadOnlyByTask.get(a) && isReadOnlyByTask.get(b)) continue;
+
+                const ancestorsA = ancestors.get(a);
+                const ancestorsB = ancestors.get(b);
+                if (!(ancestorsA?.has(b) || ancestorsB?.has(a))) {
+                    const taskA = tasksMap.get(a);
+                    const taskB = tasksMap.get(b);
+                    if (taskA && taskB) {
+                        const idxA = tasks.indexOf(taskA);
+                        const idxB = tasks.indexOf(taskB);
+                        if (idxA < idxB) {
+                            if (!taskB.dependencies.includes(a)) {
+                                taskB.dependencies.push(a);
+                                ancestors.delete(b);
+                                getAncestors(b);
+                            }
+                        } else {
+                            if (!taskA.dependencies.includes(b)) {
+                                taskA.dependencies.push(b);
+                                ancestors.delete(a);
+                                getAncestors(a);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

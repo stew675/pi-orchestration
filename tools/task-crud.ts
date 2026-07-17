@@ -6,6 +6,7 @@ import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
 import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
 import type { Task, TaskType } from "../core/types";
+import { healDependenciesOnDelete } from "../validation/validation";
 import {
     validatePlan,
     clampTaskTimeout,
@@ -77,6 +78,11 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     description:
                         "Per-task watchdog timeout in ms. Must be >= the configured default; values below that are silently raised to the default. Capped at 2× the configured default."
                 })
+            ),
+            replacesTaskId: Type.Optional(
+                Type.String({
+                    description: "Optionally specify the ID of the task this new task is replacing/splitting. If specified, dependents of the old task will be re-routed to this new task, and the old task will be deleted."
+                })
             )
         }),
         executionMode: "sequential",
@@ -120,10 +126,29 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         taskType: (params.taskType as TaskType) || undefined,
                         timeoutMs: effectiveTimeout
                     };
-                    const simulatedPlan = { ...plan, tasks: [...plan.tasks, newTask] };
+                    
+                    const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];
+                    simulatedTasks.push(newTask);
+
+                    if (params.replacesTaskId) {
+                        healDependenciesOnDelete(simulatedTasks, params.replacesTaskId, [params.id]);
+                        const oldIdx = simulatedTasks.findIndex(t => t.id === params.replacesTaskId);
+                        if (oldIdx !== -1) {
+                            simulatedTasks.splice(oldIdx, 1);
+                        }
+                    }
+
+                    const simulatedPlan = { ...plan, tasks: simulatedTasks };
                     await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
 
                     // All checks passed - safe to mutate.
+                    if (params.replacesTaskId) {
+                        healDependenciesOnDelete(plan.tasks, params.replacesTaskId, [params.id]);
+                        const oldIdx = plan.tasks.findIndex(t => t.id === params.replacesTaskId);
+                        if (oldIdx !== -1) {
+                            plan.tasks.splice(oldIdx, 1);
+                        }
+                    }
                     plan.tasks.push(newTask);
                 } catch (e) {
                     throw new Error(
@@ -243,8 +268,8 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     throw new Error(`Cannot delete task '${params.taskId}' while it is '${task.status}'.`);
                 }
 
-                // Pre-mutation: refuse to silently orphan dependent tasks.
-                validateDeleteTask(plan, params.taskId);
+                // Auto-heal dependents by bypassing the deleted task cleanly
+                healDependenciesOnDelete(plan.tasks, params.taskId, []);
 
                 plan.tasks.splice(taskIndex, 1);
             } catch (e) {
@@ -459,6 +484,9 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
 
             const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];
 
+            // Track replacements to apply them transactionally
+            const replacements = new Map<string, string[]>(); // oldTaskId -> newTaskId[]
+
             for (const update of params.updates) {
                 if (update.action === "add") {
                     if (simulatedTasks.some(t => t.id === update.id)) {
@@ -478,6 +506,13 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         taskType: (update.taskType as TaskType) || "other",
                         timeoutMs: clampTaskTimeout(update.timeoutMs)
                     });
+
+                    if (update.replacesTaskId) {
+                        if (!replacements.has(update.replacesTaskId)) {
+                            replacements.set(update.replacesTaskId, []);
+                        }
+                        replacements.get(update.replacesTaskId)!.push(update.id);
+                    }
                 } else if (update.action === "delete") {
                     const idx = simulatedTasks.findIndex(t => t.id === update.id);
                     if (idx === -1) {
@@ -499,6 +534,15 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     if (update.complexity !== undefined) task.complexity = update.complexity as "simple" | "complex";
                     if (update.taskType !== undefined) task.taskType = update.taskType as TaskType;
                     if (update.timeoutMs !== undefined) task.timeoutMs = clampTaskTimeout(update.timeoutMs);
+                }
+            }
+
+            // Apply all replacement transfers
+            for (const [oldId, newIds] of replacements.entries()) {
+                healDependenciesOnDelete(simulatedTasks, oldId, newIds);
+                const oldIdx = simulatedTasks.findIndex(t => t.id === oldId);
+                if (oldIdx !== -1) {
+                    simulatedTasks.splice(oldIdx, 1);
                 }
             }
 

@@ -5,7 +5,9 @@ import {
     detectFileConflicts,
     detectOversizedTasks,
     formatFileConflictError,
-    getDependents
+    getDependents,
+    autoHealFileConflicts,
+    healDependenciesOnDelete
 } from "../validation/validation";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
@@ -58,6 +60,9 @@ export function renderWritePlanCall(_args: any, theme: any, context: { isPartial
  * with invalid references.
  */
 export async function validatePlan(plan: any, archivedTaskIds?: Set<string>) {
+    // Automatically heal file conflicts by injecting dependencies in array-index order (Mechanism C: Implicit Safety Net)
+    autoHealFileConflicts(plan.tasks || []);
+
     const cycle = detectCycle(plan);
     if (cycle) {
         if (cycle.length > 1 && cycle[0] !== cycle[cycle.length - 1]) {
@@ -139,13 +144,7 @@ export async function validateEditTask(existingTaskIds: Set<string>, newDependen
  * to remove the dependency before deletion is allowed.
  */
 export function validateDeleteTask(plan: any, taskId: string): void {
-    const dependents = getDependents(plan, taskId);
-    if (dependents.length > 0) {
-        throw new Error(
-            `Cannot delete task '${taskId}': it is a dependency of ${dependents.length} other task(s): ${dependents.map((d) => `'${d}'`).join(", ")}.\n\n` +
-                `Edit those tasks to remove the dependency first, or delete them as well.`
-        );
-    }
+    // Replaced by automated dependency auto-healing cascading bypass
 }
 
 // ---------------------------------------------------------------------------
