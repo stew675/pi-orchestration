@@ -124,6 +124,7 @@ export class LoopDetector {
     private sigs: string[] = [];
     private triggered: boolean = false;
     private onLoopDetected: (info: LoopInfo) => void;
+    private fileReadCounts = new Map<string, number>();
 
     constructor(options: LoopDetectorOptions) {
         this.onLoopDetected = options.onLoopDetected;
@@ -132,6 +133,25 @@ export class LoopDetector {
     /** Feed a single parsed JSON event. */
     ingest(event: SubAgentEvent): void {
         if (this.triggered) return; // already fired, no-op
+
+        // Log warning if the same file is read excessively
+        if (event.type === "tool_call" || event.type === "tool_execution_start") {
+            const tool = getEventToolName(event);
+            if (tool === "read") {
+                const params = getEventParams(event);
+                const path = String(params.path || "");
+                if (path) {
+                    const count = (this.fileReadCounts.get(path) || 0) + 1;
+                    this.fileReadCounts.set(path, count);
+                    if (count === 11) {
+                        console.warn(
+                            `[LoopDetector] Sub-agent has read file "${path}" more than 10 times (${count} times). ` +
+                            `This might indicate a paging/scrolling loop or highly chunked exploration of a large file.`
+                        );
+                    }
+                }
+            }
+        }
 
         const sig = signature(event);
         if (!sig) return; // uninteresting event type
