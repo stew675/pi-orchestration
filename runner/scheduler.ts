@@ -69,6 +69,15 @@ export async function runTasks(
             // Find all pending tasks whose dependencies are completed
             const readyTasks = findReadyTasks(plan);
 
+            if (readyTasks.length > 1) {
+                // Sort tasks descending by their transitive dependent count to prioritize bottlenecks (critical path)
+                readyTasks.sort((a, b) => {
+                    const countA = getTransitiveDependentCount(plan, a.id);
+                    const countB = getTransitiveDependentCount(plan, b.id);
+                    return countB - countA;
+                });
+            }
+
             if (readyTasks.length === 0) {
                 const active = countActiveImplementationTasks(plan, countingAsyncSummaries);
                 if (active.length > 0) {
@@ -203,4 +212,19 @@ function findReadyTasks(plan: OrchestrationPlan): Task[] {
             return depTask && depTask.status === "completed";
         });
     });
+}
+
+/** Count transitive dependents of a task using DFS to determine bottleneck priorities. */
+function getTransitiveDependentCount(plan: OrchestrationPlan, taskId: string): number {
+    const visited = new Set<string>();
+    function dfs(currentId: string) {
+        for (const t of plan.tasks || []) {
+            if (t.dependencies?.includes(currentId) && !visited.has(t.id)) {
+                visited.add(t.id);
+                dfs(t.id);
+            }
+        }
+    }
+    dfs(taskId);
+    return visited.size;
 }
