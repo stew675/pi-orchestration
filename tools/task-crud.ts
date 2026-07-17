@@ -431,4 +431,89 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             };
         }
     });
+
+    pi.registerTool({
+        name: "orchestrate_bulk_update_tasks",
+        label: "Bulk Update Tasks",
+        description: "Perform multiple plan modifications (add, delete, edit tasks) in a single transactional step. Essential during replanning.",
+        parameters: Type.Object({
+            updates: Type.Array(
+                Type.Object({
+                    action: StringEnum(["add", "delete", "edit"]),
+                    id: Type.String({ description: "Task ID (e.g., task_phase1_fixed_headers)" }),
+                    description: Type.Optional(Type.String()),
+                    files: Type.Optional(Type.Array(Type.String())),
+                    dependencies: Type.Optional(Type.Array(Type.String())),
+                    complexity: Type.Optional(StringEnum(["simple", "complex"])),
+                    taskType: Type.Optional(StringEnum(["creation", "editing", "building", "administrative", "research", "reviewing", "other"])),
+                    timeoutMs: Type.Optional(Type.Number()),
+                    replacesTaskId: Type.Optional(Type.String({ description: "For 'add' action, optionally specify the ID of the task this new task is replacing/splitting." }))
+                })
+            )
+        }),
+        executionMode: "sequential",
+        async execute(_id, params, _signal, _onUpdate, _ctx) {
+            requireTaskCrudPrereqs();
+            let plan = StateManager.loadPlan();
+            if (!plan) throw new Error("No active plan found to bulk update.");
+
+            const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];
+
+            for (const update of params.updates) {
+                if (update.action === "add") {
+                    if (simulatedTasks.some(t => t.id === update.id)) {
+                        throw new Error(`Bulk add failed: Task '${update.id}' already exists.`);
+                    }
+                    if (!update.id.startsWith(TASK_ID_PREFIX)) {
+                        throw new Error(`Invalid task ID '${update.id}' in bulk add. Must start with '${TASK_ID_PREFIX}'.`);
+                    }
+                    simulatedTasks.push({
+                        id: update.id,
+                        description: update.description || "",
+                        files: update.files || [],
+                        dependencies: update.dependencies || [],
+                        status: "pending" as const,
+                        attempts: 0,
+                        complexity: (update.complexity as "simple" | "complex") || "complex",
+                        taskType: (update.taskType as TaskType) || "other",
+                        timeoutMs: clampTaskTimeout(update.timeoutMs)
+                    });
+                } else if (update.action === "delete") {
+                    const idx = simulatedTasks.findIndex(t => t.id === update.id);
+                    if (idx === -1) {
+                        throw new Error(`Bulk delete failed: Task '${update.id}' not found.`);
+                    }
+                    simulatedTasks.splice(idx, 1);
+                    // Standard dependency clean up
+                    for (const t of simulatedTasks) {
+                        t.dependencies = t.dependencies.filter(dep => dep !== update.id);
+                    }
+                } else if (update.action === "edit") {
+                    const task = simulatedTasks.find(t => t.id === update.id);
+                    if (!task) {
+                        throw new Error(`Bulk edit failed: Task '${update.id}' not found.`);
+                    }
+                    if (update.description !== undefined) task.description = update.description;
+                    if (update.files !== undefined) task.files = update.files;
+                    if (update.dependencies !== undefined) task.dependencies = update.dependencies;
+                    if (update.complexity !== undefined) task.complexity = update.complexity as "simple" | "complex";
+                    if (update.taskType !== undefined) task.taskType = update.taskType as TaskType;
+                    if (update.timeoutMs !== undefined) task.timeoutMs = clampTaskTimeout(update.timeoutMs);
+                }
+            }
+
+            // Run full validations on the simulated graph
+            const simulatedPlan = { ...plan, tasks: simulatedTasks };
+            await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
+
+            // Success: Commit the transaction
+            plan.tasks = simulatedTasks;
+            StateManager.savePlan(plan);
+
+            return {
+                content: [{ type: "text", text: `Bulk update transaction completed successfully. Modified ${params.updates.length} task(s).` }],
+                details: {}
+            };
+        }
+    });
 }

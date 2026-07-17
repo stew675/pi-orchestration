@@ -380,7 +380,8 @@ const EXECUTION_TOOLS = [
     "orchestrate_replan",
     "orchestrate_resume_task",
     "orchestrate_stop",
-    "orchestrate_approve_goal"
+    "orchestrate_approve_goal",
+    "orchestrate_bulk_update_tasks"
 ];
 
 function getAllOrchestrationToolNames(): string[] {
