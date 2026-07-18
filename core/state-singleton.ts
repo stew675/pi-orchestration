@@ -54,6 +54,9 @@ export const OrchestratorState = {
     _preWriteHintSent: false,
     /** One-shot flag: true while the reviewer model is active during plan review cycle. */
     _inReviewPhase: false,
+    /** Flag indicating that the planner is currently incorporating feedback from a recent review. 
+     *  While true, updates to the plan will not trigger a new automatic review cycle. */
+    _incorporatingFeedback: false,
     /** Set to true when user explicitly pauses/stops. Disables the watchdog. */
     _manualPause: false,
     /** Reason for manual pause: 'pause' (/om-pause), 'stop' (/om-stop), or null (system/system-triggered pause) */
@@ -163,6 +166,7 @@ const STATE_DEFAULTS = {
     _planJustUpdated: false,
     _preWriteHintSent: false,
     _inReviewPhase: false,
+    _incorporatingFeedback: false,
     _manualPause: false,
     _pauseReason: null as "pause" | "stop" | null,
     allowStopTool: true,

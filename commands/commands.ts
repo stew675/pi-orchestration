@@ -505,6 +505,7 @@ export async function showAcceptOrEditDialog(pi: ExtensionAPI, ctx: ExtensionCon
     if (result.accepted) {
         startExecutionFromPlan(pi, ctx);
     } else if (result.feedback && result.feedback.trim()) {
+        OrchestratorState._incorporatingFeedback = false; // User input breaks the automatic review loop
         /* Send user feedback back to the agent so it can refine the plan.
          * Prepended with PLANNING_HINT_EDIT for thoroughness guidance-in-the-moment.
          * display: false avoids the [undefined] source label since the user's input

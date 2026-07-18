@@ -87,6 +87,7 @@ export function registerPlanTools(pi: ExtensionAPI) {
 
             // Flag that the plan was just presented - triggers Accept/Edit dialog on turn_end.
             OrchestratorState._planJustUpdated = true;
+            OrchestratorState._incorporatingFeedback = false; // Finished incorporating review feedback.
 
             return toolResponse(`--- Implementation Plan ---\n\n${planContent}`);
         }

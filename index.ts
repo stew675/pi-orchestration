@@ -220,11 +220,21 @@ export default function (pi: ExtensionAPI) {
         if (event.toolName === "orchestrate_write_plan" || event.toolName === "orchestrate_edit_plan") {
             const planContent = StateManager.loadImplementationPlan();
 
-            // If a reviewer model is configured, kick off the review cycle instead of
-            // showing the Accept/Edit dialog immediately.
-            if (OrchestratorState.reviewerModel) {
+            // If a reviewer model is configured AND we aren't currently incorporating review feedback,
+            // kick off the review cycle instead of showing the Accept/Edit dialog immediately.
+            if (OrchestratorState.reviewerModel && !OrchestratorState._incorporatingFeedback) {
                 OrchestratorState._inReviewPhase = true;
-                switchToReviewerModel(pi, ctx).catch((e: Error) => {
+                switchToReviewerModel(pi, ctx).then(() => {
+                    // Automate the review start by sending a prompt to the reviewer model.
+                    pi.sendMessage(
+                        {
+                            customType: "orchestrator_event",
+                            content: "System: You are now acting as the Plan Reviewer. Please review the implementation plan at .pi/orchestration/plans/implementation-plan.md and provide your assessment using orchestrate_review_plan. Be thorough in identifying missing steps, incorrect assumptions, or suboptimal approaches.",
+                            display: false
+                        },
+                        { deliverAs: "nextTurn", triggerTurn: true }
+                    );
+                }).catch((e: Error) => {
                     console.error("Failed to switch to reviewer model:", e);
                     OrchestratorState._inReviewPhase = false;
                     OrchestratorState._planJustUpdated = true;
@@ -257,6 +267,7 @@ export default function (pi: ExtensionAPI) {
         } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
             // Reviewer finished — switch back to planning model and instruct planner to process review.
             OrchestratorState._inReviewPhase = false;
+            OrchestratorState._incorporatingFeedback = true; // Mark that the planner is now incorporating feedback.
             restoreFromReviewPhase(pi, ctx).then(() => {
                 pi.sendMessage(
                     {
