@@ -95,6 +95,22 @@ function handleResumeReview(_plan: OrchestrationPlan, pi: ExtensionAPI) {
     );
 }
 
+function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
+    // Resuming from code-review phase (reviewing_code).
+    // Re-run the code review sub-agent. If it fails again, fall through to normal review.
+    sendResumeMessage(
+        pi,
+        `System: Resuming from REVIEWING state. Code review was interrupted — re-running automated code review.`
+    );
+
+    // Set status back so the runner can pick up the code-review flow via finishPlan
+    plan.status = "executing";
+    StateManager.savePlan(plan);
+    Runner.runTasks(pi).catch((err: Error) => {
+        console.error("Code review resume error:", err);
+    });
+}
+
 function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI) {
     const clarifyingTask = (plan.tasks || []).find((t: Task) => t.status === "awaiting_clarification");
     if (clarifyingTask) {
@@ -174,6 +190,7 @@ function resumePlanExecution(_stalePlan: unknown, pi: ExtensionAPI) {
 
     const handlers: Record<string, (p: OrchestrationPlan, pi: ExtensionAPI) => void> = {
         reviewing: handleResumeReview,
+        reviewing_code: handleResumeCodeReview,
         executing: handleResumeExecutingOrPaused,
         paused: handleResumeExecutingOrPaused,
         planning: handleResumePlanning,
