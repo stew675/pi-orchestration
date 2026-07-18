@@ -3,7 +3,7 @@ import type { ModelRef, OrchestrationPlan, Task } from "../core/types";
 import { ACTIVE_TASK_STATUSES } from "../core/types";
 import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
-import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage } from "./utils";
+import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
 
 // ---------------------------------------------------------------------------
@@ -188,7 +188,9 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             // Delete old code-review.md if present
             StateManager.deleteCodeReview();
 
-            notifyOrchestrator(pi, "System: Starting automated Code Review...", { tuiVisible: true });
+            // Notify TUI only — do NOT wake the orchestrator while
+            // the sub-agent is still running. It will be notified after verdict.
+            notifyTuiOnly(pi, `System: Starting automated Code Review (${codeReviewModel.provider}/${codeReviewModel.id})...`);
 
             try {
                 const { runCodeReview } = await import("./code-reviewer");
@@ -232,12 +234,14 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             if (!updatedPlan) return;
 
             if (approved) {
+                notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
                 // Code review passed — proceed to final verification
                 updatedPlan.status = "reviewing";
                 savePlanSafely(updatedPlan);
                 const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             } else if (rejected) {
+                notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
                 // Code review rejected — remain in reviewing_code and wake orchestrator for remediation
                 updatedPlan.status = "reviewing_code";
                 savePlanSafely(updatedPlan);
@@ -255,7 +259,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 ].join("\n");
                 notifyOrchestrator(pi, wakeMessage, { tuiVisible: true });
             } else {
-                // No verdict file on disk (sub-agent failed/timed out) — fall through to normal review
+                notifyTuiOnly(pi, "System: Code review sub-agent produced no verdict — proceeding to FINAL REVIEW.");
                 updatedPlan.status = "reviewing";
                 savePlanSafely(updatedPlan);
                 const reviewMessage = buildFinalReviewMessage(updatedPlan);
