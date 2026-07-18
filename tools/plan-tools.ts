@@ -91,4 +91,22 @@ export function registerPlanTools(pi: ExtensionAPI) {
             return toolResponse(`--- Implementation Plan ---\n\n${planContent}`);
         }
     });
+
+    pi.registerTool({
+        name: "orchestrate_review_plan",
+        label: "Write Plan Review",
+        description:
+            "Write a review of the implementation plan to .pi/orchestration/plans/plan-review.md. " +
+            "This tool is used by the reviewer model to capture its assessment of the plan.\n" +
+            "After calling this, STOP IMMEDIATELY — do not generate further content.",
+        parameters: Type.Object({
+            reviewContent: Type.String({ description: "The full markdown content for the plan review" })
+        }),
+        executionMode: "sequential",
+        async execute(_id, params, _signal, _onUpdate, _ctx) {
+            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            StateManager.savePlanReview(params.reviewContent);
+            return toolResponse("Plan review saved to plan-review.md.");
+        }
+    });
 }

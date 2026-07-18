@@ -39,6 +39,8 @@ export {
     resolveTaskModelByComplexity,
     resolveValidatorModel,
     resolveSummaryModel,
+    switchToReviewerModel,
+    restoreFromReviewPhase,
     formatModel,
     recoverInterruptedTasks,
     computeExecutionPhaseLabel,

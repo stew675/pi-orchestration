@@ -8,7 +8,9 @@ import {
     resetState,
     beginShutdown,
     recoverInterruptedTasks,
-    requireActive
+    requireActive,
+    switchToReviewerModel,
+    restoreFromReviewPhase
 } from "./core";
 import {
     registerEnableCommand,
@@ -41,7 +43,7 @@ import {
 } from "./process/loop-detector";
 
 import { ORCHESTRATOR_PLANNING_SYSTEM_PROMPT, ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT,
-    PLANNING_HINT_PRE_WRITE } from "./context/prompts";
+    PLANNING_HINT_PRE_WRITE, ORCHESTRATOR_REVIEW_SYSTEM_PROMPT } from "./context/prompts";
 
 /** Watchdog timer interval (ms) — checks for stalled orchestrator every 2 seconds during execution. */
 const WATCHDOG_INTERVAL_MS = 2000;
@@ -184,6 +186,10 @@ export default function (pi: ExtensionAPI) {
             }
 
             // Select the appropriate prompt based on current phase.
+            if (OrchestratorState._inReviewPhase) {
+                return { systemPrompt: ORCHESTRATOR_REVIEW_SYSTEM_PROMPT };
+            }
+
             if (OrchestratorState.isExecuting) {
                 return { systemPrompt: ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT };
             }
@@ -208,13 +214,25 @@ export default function (pi: ExtensionAPI) {
 
     /** Intercept planning tool results and replace them with the full plan from disk.
      *  Also injects contextual hints at key moments for guidance-in-the-moment pattern. */
-    pi.on("tool_result", async (event) => {
+    pi.on("tool_result", async (event, ctx) => {
         if (!OrchestratorState.isActive || !OrchestratorState.planningMode || event.isError) return;
 
         if (event.toolName === "orchestrate_write_plan" || event.toolName === "orchestrate_edit_plan") {
             const planContent = StateManager.loadImplementationPlan();
-            // Flag that the plan was just updated - show Accept/Edit dialog on agent_settled.
-            OrchestratorState._planJustUpdated = true;
+
+            // If a reviewer model is configured, kick off the review cycle instead of
+            // showing the Accept/Edit dialog immediately.
+            if (OrchestratorState.reviewerModel) {
+                OrchestratorState._inReviewPhase = true;
+                switchToReviewerModel(pi, ctx).catch((e: Error) => {
+                    console.error("Failed to switch to reviewer model:", e);
+                    OrchestratorState._inReviewPhase = false;
+                    OrchestratorState._planJustUpdated = true;
+                });
+            } else {
+                // Flag that the plan was just updated - show Accept/Edit dialog on agent_settled.
+                OrchestratorState._planJustUpdated = true;
+            }
 
             if (event.toolName === "orchestrate_write_plan") {
                 // Inject pre-write quality hint on first call (one-shot).
@@ -236,6 +254,22 @@ export default function (pi: ExtensionAPI) {
                     content: [{ type: "text", text: `--- Implementation Plan ---\n\n${planContent}` }]
                 };
             }
+        } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
+            // Reviewer finished — switch back to planning model and instruct planner to process review.
+            OrchestratorState._inReviewPhase = false;
+            restoreFromReviewPhase(pi, ctx).then(() => {
+                pi.sendMessage(
+                    {
+                        customType: "orchestrator_event",
+                        content:
+                            "System: The reviewer has completed its assessment. Read .pi/orchestration/plans/plan-review.md for the review findings. If you agree with any issues or recommendations, use orchestrate_edit_plan to make improvements. Then call orchestrate_present_plan to show the final plan to the user and STOP IMMEDIATELY.",
+                        display: false
+                    },
+                    { deliverAs: "nextTurn", triggerTurn: true }
+                );
+            }).catch((e: Error) => {
+                console.error("Failed to restore from review phase:", e);
+            });
         }
     });
 
@@ -252,7 +286,7 @@ export default function (pi: ExtensionAPI) {
     /** Show Accept/Edit dialog only when the agent has fully settled (no retries/compaction/follow-ups left).
      *  This avoids false triggers from auto-retry or auto-compaction cycles that also fire turn_end. */
     pi.on("agent_settled", async (_event, ctx) => {
-        if (OrchestratorState._planJustUpdated && OrchestratorState.isActive && OrchestratorState.planningMode) {
+        if (OrchestratorState._planJustUpdated && !OrchestratorState._inReviewPhase && OrchestratorState.isActive && OrchestratorState.planningMode) {
             OrchestratorState._planJustUpdated = false;
             // Small delay so the tool result has fully rendered before overlay appears.
             setTimeout(async () => {

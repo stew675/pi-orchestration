@@ -27,6 +27,7 @@ const MODEL_SCOPES: Record<
             | "complexTaskModel"
             | "validatorModel"
             | "summaryModel"
+            | "reviewerModel"
         >;
         label: string;
     }
@@ -36,7 +37,8 @@ const MODEL_SCOPES: Record<
     simpleTask: { key: "simpleTaskModel", label: "Simple task model" },
     complexTask: { key: "complexTaskModel", label: "Complex task model" },
     validator: { key: "validatorModel", label: "Validator model" },
-    summary: { key: "summaryModel", label: "Summary model" }
+    summary: { key: "summaryModel", label: "Summary model" },
+    reviewer: { key: "reviewerModel", label: "Plan review model" }
 };
 
 /**
@@ -62,6 +64,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 `  Complex task model:    ${formatModel(OrchestratorState.complexTaskModel)}\n` +
                 `  Validator:             ${formatModel(OrchestratorState.validatorModel)}\n` +
                 `  Summary:               ${formatModel(OrchestratorState.summaryModel)}\n` +
+                `  Reviewer:              ${formatModel(OrchestratorState.reviewerModel) || "(disabled)"}\n` +
                 `  Summary concurrency:   ${OrchestratorState.summarizationConcurrency}\n` +
                 `  Parallel tasks:        ${OrchestratorState.parallelTasks}\n` +
                 `  Task timeout:          ${formatTimeout(OrchestratorState.taskTimeoutMs)}\n` +
@@ -93,6 +96,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         const complexTaskStr = formatModel(OrchestratorState.complexTaskModel);
         const validatorStr = formatModel(OrchestratorState.validatorModel);
         const summaryStr = formatModel(OrchestratorState.summaryModel);
+        const reviewerStr = formatModel(OrchestratorState.reviewerModel) || "(disabled)";
         const concStr = OrchestratorState.summarizationConcurrency.toString();
         const parallelTasksStr = OrchestratorState.parallelTasks.toString();
 
@@ -114,6 +118,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
             { value: "complex-task-model", label: `Complex task model (${complexTaskStr})` },
             { value: "validator-model", label: `Validator model (${validatorStr})` },
             { value: "summary-model", label: `Summary model (${summaryStr})` },
+            { value: "reviewer-model", label: `Plan review model (${reviewerStr})` },
             { value: "summarization-concurrency", label: `Summarization concurrency (${concStr})` },
             { value: "parallel-tasks", label: `Parallel tasks (${parallelTasksStr})` },
             { value: "timeout-task", label: `Task timeout (${taskTimeoutStr})` },
@@ -179,6 +184,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         "complex-task-model": () => handleModelSelection(ctx, pi, "complexTask"),
         "validator-model": () => handleModelSelection(ctx, pi, "validator"),
         "summary-model": () => handleModelSelection(ctx, pi, "summary"),
+        "reviewer-model": () => handleReviewerModelSelection(ctx, pi),
         "summarization-concurrency": async () => {
             await handleNumberInput(
                 ctx,
@@ -339,6 +345,111 @@ async function handleModelSelection(
     } catch (err) {
         console.error("Model picker error:", err);
         ctx.ui.notify(`Error opening model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+}
+
+/**
+ * Open a custom reviewer model picker that includes a "(None)" sentinel option.
+ * This is separate from handleModelSelection because the standard picker doesn't support disabling.
+ */
+interface ReviewerPickerItem {
+    none?: boolean;
+    provider?: string;
+    id?: string;
+}
+async function handleReviewerModelSelection(
+    ctx: ExtensionContext,
+    _pi: ExtensionAPI
+): Promise<void> {
+    try {
+        const availableModels = await ctx.modelRegistry.getAvailable();
+        if (availableModels.length === 0) {
+            // No models available — only option is to disable
+            OrchestratorState.reviewerModel = null;
+            persistSettings(OrchestratorState);
+            ctx.ui.notify("Plan review disabled (no models available).", "info");
+            return;
+        }
+
+        // Build items with "(None)" at top, then all available models
+        const items: ReviewerPickerItem[] = [
+            { none: true },
+            ...availableModels.map((m) => ({ provider: m.provider, id: m.id }))
+        ];
+
+        const selected = await ctx.ui.custom<ReviewerPickerItem | null>(
+            (tui, theme, _keybindings, done) => {
+                const container = new Container();
+
+                // Top border
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+                // Title
+                container.addChild(new Text(theme.fg("accent", theme.bold("Select Plan Review Model")), 1, 0));
+                container.addChild(new Text(
+                    theme.fg("muted", `Current: ${formatModel(OrchestratorState.reviewerModel) || "(disabled)"}`),
+                    1, 0
+                ));
+
+                // Build display labels for the list
+                const displayItems: SelectItem[] = items.map((item, index) => {
+                    if (item.none) {
+                        return { value: String(index), label: "(None) — disable plan review" };
+                    }
+                    return {
+                        value: String(index),
+                        label: `${item.provider}/${item.id}`
+                    };
+                });
+
+                const selectList = new SelectList(displayItems, Math.min(displayItems.length, 12), {
+                    selectedPrefix: (t) => theme.fg("accent", t),
+                    selectedText: (t) => theme.fg("accent", t),
+                    description: (t) => theme.fg("muted", t),
+                    scrollInfo: (t) => theme.fg("dim", t),
+                    noMatch: (t) => theme.fg("warning", t)
+                });
+
+                selectList.onSelect = (item) => {
+                    const idx = parseInt(item.value, 10);
+                    done(items[idx] || null);
+                };
+                selectList.onCancel = () => done(null);
+
+                container.addChild(selectList);
+
+                // Help text
+                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel"), 1, 0));
+
+                // Bottom border
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+                return {
+                    render: (w) => container.render(w),
+                    invalidate: () => container.invalidate(),
+                    handleInput: (data) => {
+                        selectList.handleInput(data);
+                        tui.requestRender();
+                    }
+                };
+            },
+            { overlay: true, overlayOptions: { anchor: "center", width: "50%", margin: 2 } }
+        );
+
+        if (!selected) return; // cancelled
+
+        if (selected.none) {
+            OrchestratorState.reviewerModel = null;
+            persistSettings(OrchestratorState);
+            ctx.ui.notify("Plan review disabled.", "info");
+        } else if (selected.provider && selected.id) {
+            OrchestratorState.reviewerModel = { provider: selected.provider, id: selected.id };
+            persistSettings(OrchestratorState);
+            ctx.ui.notify(`Plan review model set to ${selected.provider}/${selected.id}.`, "info");
+        }
+    } catch (err) {
+        console.error("Reviewer model picker error:", err);
+        ctx.ui.notify(`Error opening reviewer model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
 }
 

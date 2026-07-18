@@ -32,6 +32,7 @@ export const OrchestratorState = {
     validatorModel: null as ModelRef | null,
     orchestrationModel: null as ModelRef | null,
     planningModel: null as ModelRef | null,
+    reviewerModel: null as ModelRef | null,
     summarizationConcurrency: 0,
     parallelTasks: 1,
     shuttingDown: false,
@@ -39,6 +40,8 @@ export const OrchestratorState = {
     originalMainModel: undefined as ModelRef | undefined,
     /** Model active before entering planning mode (orchestration or main) - restored when exiting planning. */
     prePlanningModel: undefined as ModelRef | undefined,
+    /** Model active before switching to the reviewer model - restored after review phase completes. */
+    preReviewModel: undefined as ModelRef | undefined,
     /** Original system prompt captured on first orchestration turn - restored on exit. */
     originalSystemPrompt: undefined as string | undefined,
     /** One-time flag: inject a restoration message on the next agent turn after exit. */
@@ -49,6 +52,8 @@ export const OrchestratorState = {
     _planJustUpdated: false,
     /** One-shot flag: pre-write quality hint sent. Fires once on first orchestrate_write_plan call. */
     _preWriteHintSent: false,
+    /** One-shot flag: true while the reviewer model is active during plan review cycle. */
+    _inReviewPhase: false,
     /** Set to true when user explicitly pauses/stops. Disables the watchdog. */
     _manualPause: false,
     /** Reason for manual pause: 'pause' (/om-pause), 'stop' (/om-stop), or null (system/system-triggered pause) */
@@ -147,14 +152,17 @@ const STATE_DEFAULTS = {
     validatorModel: null as ModelRef | null,
     orchestrationModel: null as ModelRef | null,
     planningModel: null as ModelRef | null,
+    reviewerModel: null as ModelRef | null,
     originalMainModel: undefined as ModelRef | undefined,
     prePlanningModel: undefined as ModelRef | undefined,
+    preReviewModel: undefined as ModelRef | undefined,
     shuttingDown: false,
     originalSystemPrompt: undefined as string | undefined,
     pendingSystemPromptRestore: false,
     shouldResetContext: false,
     _planJustUpdated: false,
     _preWriteHintSent: false,
+    _inReviewPhase: false,
     _manualPause: false,
     _pauseReason: null as "pause" | "stop" | null,
     allowStopTool: true,
@@ -322,6 +330,76 @@ export async function exitPlanningMode(
 }
 
 /**
+ * Switch to the configured reviewer model for plan review.
+ * Keeps conversation history intact (no context reset).
+ * Captures the currently active model so it can be restored via `restoreFromReviewPhase`.
+ */
+export async function switchToReviewerModel(
+    pi: ExtensionAPI,
+    ctx: { model?: ModelRef; modelRegistry: { find: (provider: string, id: string) => any }; ui?: { notify?: (...args: any[]) => void } }
+): Promise<boolean> {
+    // Capture the current active model before switching
+    if (ctx.model && OrchestratorState.preReviewModel === undefined) {
+        OrchestratorState.preReviewModel = { provider: ctx.model.provider, id: ctx.model.id };
+    }
+
+    const reviewerModel = OrchestratorState.reviewerModel;
+    if (!reviewerModel) return false;
+
+    const targetModel = ctx.modelRegistry.find(reviewerModel.provider, reviewerModel.id);
+    if (!targetModel) {
+        console.warn(`Reviewer model ${reviewerModel.provider}/${reviewerModel.id} not found in registry.`);
+        return false;
+    }
+
+    const success = await pi.setModel(targetModel);
+    if (success) {
+        ctx.ui?.notify?.(`Switched to reviewer model: ${reviewerModel.provider}/${reviewerModel.id}`, "info");
+    } else {
+        console.warn(`No API key available for reviewer model ${reviewerModel.provider}/${reviewerModel.id}.`);
+        ctx.ui?.notify?.(
+            `Cannot switch to reviewer model ${reviewerModel.provider}/${reviewerModel.id} - no configured API key.`,
+            "warning"
+        );
+    }
+    return success;
+}
+
+/**
+ * Restore the model that was active before the review phase.
+ * Called when exiting plan review (after reviewer completes its assessment).
+ */
+export async function restoreFromReviewPhase(
+    pi: ExtensionAPI,
+    ctx: { modelRegistry: { find: (provider: string, id: string) => any }; ui?: { notify?: (...args: any[]) => void } }
+): Promise<void> {
+    const pre = OrchestratorState.preReviewModel;
+    if (!pre) {
+        OrchestratorState.preReviewModel = undefined;
+        return;
+    }
+
+    const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
+    if (!targetModel) {
+        console.warn(`Pre-review model ${pre.provider}/${pre.id} not found in registry.`);
+        OrchestratorState.preReviewModel = undefined;
+        return;
+    }
+
+    const success = await pi.setModel(targetModel);
+    if (success) {
+        ctx.ui?.notify?.("Restored pre-review model.", "info");
+    } else {
+        console.warn(`No API key available for pre-review model ${pre.provider}/${pre.id}.`);
+        ctx.ui?.notify?.(
+            `Cannot restore pre-review model ${pre.provider}/${pre.id} - no configured API key.`,
+            "warning"
+        );
+    }
+    OrchestratorState.preReviewModel = undefined;
+}
+
+/**
  * Mark the orchestrator as shutting down. Runner close handlers check this flag
  * to avoid writing stale state after session_shutdown has begun.
  */
@@ -365,7 +443,7 @@ export function updateActiveTools(pi: ExtensionAPI) {
 }
 
 /** Orchestration tools that are safe to use during planning (plan file management). */
-const PLANNING_TOOLS = ["orchestrate_write_plan", "orchestrate_edit_plan", "orchestrate_present_plan"];
+const PLANNING_TOOLS = ["orchestrate_write_plan", "orchestrate_edit_plan", "orchestrate_present_plan", "orchestrate_review_plan"];
 
 /** Task manipulation tools - only available outside of planning mode. */
 const EXECUTION_TOOLS = [
@@ -427,6 +505,14 @@ export function resolveSummaryModel(fallback?: { provider: string; id: string })
     if (OrchestratorState.summaryModel) return OrchestratorState.summaryModel;
     if (OrchestratorState.simpleTaskModel) return OrchestratorState.simpleTaskModel;
     return fallback;
+}
+
+/**
+ * Resolve the effective model for plan-review agents.
+ * Returns null if no reviewer model is configured (feature disabled).
+ */
+export function resolveReviewerModel(): ModelRef | null {
+    return OrchestratorState.reviewerModel;
 }
 
 /**
@@ -648,6 +734,7 @@ export function setModelRef(
         | "validatorModel"
         | "orchestrationModel"
         | "planningModel"
+        | "reviewerModel"
     >,
     value: ModelRef | null
 ): void {

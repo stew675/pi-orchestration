@@ -380,6 +380,15 @@ function extractGoalFromMarkdown(content: string): string {
  * Shared by /om-accept command and the Accept/Edit dialog overlay.
  */
 export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionContext) {
+    // Guard: review phase must not be active
+    if (OrchestratorState._inReviewPhase) {
+        ctx.ui.notify(
+            "Plan review is in progress — please wait for it to complete.",
+            "info"
+        );
+        return;
+    }
+
     // Guard: implementation-plan.md must exist and have content.
     const implPlan = StateManager.loadImplementationPlan();
     if (!implPlan || !implPlan.trim()) {
@@ -451,6 +460,15 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
  * Show the Accept/Edit dialog overlay after a plan was written/edited.
  */
 export async function showAcceptOrEditDialog(pi: ExtensionAPI, ctx: ExtensionContext) {
+    // Guard: review phase must not be active
+    if (OrchestratorState._inReviewPhase) {
+        ctx.ui.notify(
+            "Plan review is in progress — please wait for it to complete.",
+            "info"
+        );
+        return;
+    }
+
     const result = await ctx.ui.custom<{
         accepted?: boolean;
         cancelled?: boolean;
@@ -698,6 +716,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 await exitPlanningMode(pi, ctx);
                 OrchestratorState._manualPause = false;
                 OrchestratorState._pauseReason = null;
+                OrchestratorState._inReviewPhase = false;
                 setOrchestrationMode(OrchestratorState.isActive, false, false, pi, refreshBorder);
                 ctx.ui.notify("Orchestration plan cleared. Describe a new goal to start planning.", "info");
             }
