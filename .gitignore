@@ -26,3 +26,6 @@ package-lock.json
 confusion
 auto
 did-not-ask
+
+# Test Results
+test_results.txt

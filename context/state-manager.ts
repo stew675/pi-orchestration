@@ -27,6 +27,9 @@ function getPlanMdPath(): string {
 function getImplementationPlanPath(): string {
     return getOrchestrationPath("plans", "implementation-plan.md");
 }
+function getPlanReviewPath(): string {
+    return getOrchestrationPath("plans", "plan-review.md");
+}
 
 /** Legacy root-level plan paths (pre-reorganisation). Used for migration fallback. */
 function legacyPlanJsonPath(): string {
@@ -63,6 +66,9 @@ let cachedPlan: OrchestrationPlan | null | undefined = undefined;
 
 /** @internal Cached copy of the implementation plan markdown content. Invalidated by clearPlan(). Uses undefined as "not yet populated" sentinel to distinguish from "plan doesn't exist". */
 let cachedImplementationPlan: string | null | undefined = undefined;
+
+/** @internal Cached copy of the plan review markdown content. Invalidated by clearPlan(). Uses undefined as "not yet populated" sentinel to distinguish from "review doesn't exist". */
+let cachedPlanReview: string | null | undefined = undefined;
 
 /** Subscribe to plan-change events. Returns an unsubscribe function. */
 export function onPlanChange(listener: () => void): () => void {
@@ -154,7 +160,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     const plan = obj as Record<string, unknown>;
     if (typeof plan.goal !== "string") return false;
 
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed"];
+    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
     if (!validStatuses.includes(plan.status as string)) return false;
 
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
@@ -203,7 +209,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
         console.warn("Plan recovery failed: missing or invalid 'goal' field");
         return null;
     }
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed"];
+    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
     if (!validStatuses.includes(plan.status as string)) {
         console.warn(`Plan recovery failed: invalid status ${JSON.stringify(plan.status)}`);
         return null;
@@ -493,6 +499,7 @@ export class StateManager {
     /** Remove all orchestration files (plans/, tasks/, archive/, agent-logs/, summaries/, validations/). */
     static clearPlan(): void {
         cachedImplementationPlan = undefined; // invalidate implementation plan cache
+        cachedPlanReview = undefined; // invalidate plan review cache
         const unlinkIfExists = (p: string) => {
             if (fs.existsSync(p)) fs.unlinkSync(p);
         };
@@ -754,5 +761,60 @@ export class StateManager {
         safeWriteFile(filePath, updated);
         cachedImplementationPlan = updated; // update in-memory cache
         return "Implementation plan edited successfully.";
+    }
+
+    /** Load the plan review if it exists. Uses in-memory cache when available. */
+    static loadPlanReview(): string | null {
+        // Return cached value if available - avoids repeated sync disk reads.
+        if (cachedPlanReview !== undefined) return cachedPlanReview;
+
+        const filePath = getPlanReviewPath();
+        if (fs.existsSync(filePath)) {
+            cachedPlanReview = fs.readFileSync(filePath, "utf-8");
+            return cachedPlanReview;
+        }
+        cachedPlanReview = null;
+        return null;
+    }
+
+    /** Save (overwrite) the plan review file. Updates in-memory cache so subsequent loads don't re-read disk. */
+    static savePlanReview(content: string): void {
+        this.initDirs();
+        const filePath = getPlanReviewPath();
+        safeWriteFile(filePath, content);
+        cachedPlanReview = content; // update in-memory cache
+    }
+
+    /** Path to code-review.md */
+    static getCodeReviewPath(): string {
+        return getOrchestrationPath("plans", "code-review.md");
+    }
+
+    /** Load code-review.md if it exists. */
+    static loadCodeReview(): string | null {
+        const filePath = this.getCodeReviewPath();
+        if (fs.existsSync(filePath)) {
+            return fs.readFileSync(filePath, "utf-8");
+        }
+        return null;
+    }
+
+    /** Save (overwrite) code-review.md */
+    static saveCodeReview(content: string): void {
+        this.initDirs();
+        const filePath = this.getCodeReviewPath();
+        safeWriteFile(filePath, content);
+    }
+
+    /** Delete code-review.md */
+    static deleteCodeReview(): void {
+        const filePath = this.getCodeReviewPath();
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+            } catch (err) {
+                console.error(`Failed to delete code-review.md:`, err);
+            }
+        }
     }
 }

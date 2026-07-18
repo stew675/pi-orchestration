@@ -39,6 +39,18 @@ export function notifyOrchestrator(pi: ExtensionAPI, message: string, options?: 
     }
 }
 
+/**
+ * TUI-only status update. Appends a visual entry but does NOT wake the orchestrator.
+ * Use when background work is in progress and the orchestrator should not be disturbed.
+ */
+export function notifyTuiOnly(pi: ExtensionAPI, message: string): void {
+    try {
+        appendOrchestratorStatusEntry(pi, message);
+    } catch (e) {
+        console.warn("Failed to append TUI-only status:", e);
+    }
+}
+
 /** Append a TUI-only orchestration status entry (does NOT participate in LLM context). */
 function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void {
     try {

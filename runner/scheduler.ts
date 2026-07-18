@@ -3,7 +3,8 @@ import type { ModelRef, OrchestrationPlan, Task } from "../core/types";
 import { ACTIVE_TASK_STATUSES } from "../core/types";
 import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
-import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage } from "./utils";
+import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
+import * as fs from "fs";
 
 // ---------------------------------------------------------------------------
 // Scheduling lock - ensures only one scheduling decision runs at a time.
@@ -179,13 +180,100 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
 
     // All tasks completed - enter final review (must wake orchestrator)
     if (finalPlan.tasks.every((t) => t.status === "completed")) {
-        finalPlan.status = "reviewing";
-        savePlanSafely(finalPlan);
+        const codeReviewModel = OrchestratorState.codeReviewModel;
+        if (codeReviewModel) {
+            finalPlan.status = "reviewing_code";
+            savePlanSafely(finalPlan);
 
-        // Build a contextual wakeup message with task summaries so the orchestrator
-        // has everything it needs to decide - no need for redundant verification tasks.
-        const reviewMessage = buildFinalReviewMessage(finalPlan);
-        notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
+            // Delete old code-review.md if present
+            StateManager.deleteCodeReview();
+
+            // Notify TUI only — do NOT wake the orchestrator while
+            // the sub-agent is still running. It will be notified after verdict.
+            notifyTuiOnly(pi, `System: Starting automated Code Review (${codeReviewModel.provider}/${codeReviewModel.id})...`);
+
+            try {
+                const { runCodeReview } = await import("./code-reviewer");
+                // Use return value only to detect sub-agent failure (timeout/kill/process error).
+                // The actual verdict is read from disk — tool call results can fail due to model
+                // inconsistencies, and the disk file written by the tool execute handler is source of truth.
+                const result = await runCodeReview(pi, codeReviewModel);
+
+                // If the sub-agent itself failed (timed out, killed, process error), fall through to normal review
+                if (!result.approved && result.feedback) {
+                    notifyOrchestrator(
+                        pi,
+                        `System: Code review sub-agent did not produce a verdict (${result.feedback}). Proceeding to final review without code review.`,
+                        { tuiVisible: true }
+                    );
+                }
+            } catch (err) {
+                console.error("Code review execution failed:", err);
+                notifyOrchestrator(
+                    pi,
+                    `System: Code review sub-agent error (${err instanceof Error ? err.message : String(err)}). Proceeding to final review without code review.`,
+                    { tuiVisible: true }
+                );
+            }
+
+            // Inspect the resulting code-review.md file on disk (source of truth)
+            let approved = false;
+            let rejected = false;
+            const codeReviewPath = StateManager.getCodeReviewPath();
+            if (fs.existsSync(codeReviewPath)) {
+                const content = fs.readFileSync(codeReviewPath, "utf-8");
+                const firstLine = content.split("\n")[0].trim();
+                if (firstLine === "APPROVED") {
+                    approved = true;
+                } else if (firstLine === "CHANGES NEEDED") {
+                    rejected = true;
+                }
+            }
+
+            const updatedPlan = StateManager.loadPlan();
+            if (!updatedPlan) return;
+
+            if (approved) {
+                notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
+                // Code review passed — proceed to final verification
+                updatedPlan.status = "reviewing";
+                savePlanSafely(updatedPlan);
+                const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
+                notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
+            } else if (rejected) {
+                notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
+                // Code review rejected — remain in reviewing_code and wake orchestrator for remediation
+                updatedPlan.status = "reviewing_code";
+                savePlanSafely(updatedPlan);
+
+                const wakeMessage = [
+                    "System: Code review complete. Changes are required before final approval.",
+                    "Please read the .pi/orchestration/plans/code-review.md file and take action upon the contents of that file.",
+                    "",
+                    "Review Instructions for Orchestrator:",
+                    "1. Analyze the true priority of the recommendations within the code review.",
+                    "2. Ignore all items of Low priority or lower.",
+                    "3. Analyze the remaining items for false-positives and reject those.",
+                    "4. If any review items remain, issue remedial tasks to correct them (use orchestrate_add_task, orchestrate_edit_task, etc., and then orchestrate_start_task).",
+                    "5. If you find that nothing in the code-review requires further action, you MUST call orchestrate_complete_review to exit the REVIEWING phase."
+                ].join("\n");
+                notifyOrchestrator(pi, wakeMessage, { tuiVisible: true });
+            } else {
+                notifyTuiOnly(pi, "System: Code review sub-agent produced no verdict — proceeding to FINAL REVIEW.");
+                updatedPlan.status = "reviewing";
+                savePlanSafely(updatedPlan);
+                const reviewMessage = buildFinalReviewMessage(updatedPlan);
+                notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
+            }
+        } else {
+            finalPlan.status = "reviewing";
+            savePlanSafely(finalPlan);
+
+            // Build a contextual wakeup message with task summaries so the orchestrator
+            // has everything it needs to decide - no need for redundant verification tasks.
+            const reviewMessage = buildFinalReviewMessage(finalPlan);
+            notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
+        }
     }
 }
 

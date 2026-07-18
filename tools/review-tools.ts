@@ -5,6 +5,7 @@ import { Runner } from "../runner";
 import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG } from "../core";
 import { refreshBorder } from "../ui/ui";
 import { resetLoopState } from "../process/loop-detector";
+import { buildFinalReviewMessage, notifyOrchestrator } from "../runner/utils";
 
 /** Plan status that permits goal approval. */
 const REVIEW_STATUS = "reviewing";
@@ -29,6 +30,14 @@ export function registerReviewTools(pi: ExtensionAPI) {
             if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
+
+            if (plan.status === "reviewing_code") {
+                throw new Error(
+                    "orchestrate_approve_goal may not be used when in the REVIEWING phase. " +
+                    "To exit the REVIEWING phase, you must either use orchestrate_complete_review, " +
+                    "or issue 1 or more task commands (such as orchestrate_add_task) followed by orchestrate_start_task."
+                );
+            }
 
             // Only allow approval during the review phase - prevents premature approval
             if (plan.status !== REVIEW_STATUS) {
@@ -57,6 +66,48 @@ export function registerReviewTools(pi: ExtensionAPI) {
                     }
                 ],
                 terminate: true,
+                details: {}
+            };
+        }
+    });
+
+    pi.registerTool({
+        name: "orchestrate_complete_review",
+        label: "Complete Code Review",
+        description: "Complete the code review phase and proceed to final verification. Only callable during the REVIEWING phase.",
+        parameters: Type.Object({}),
+        async execute() {
+            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            const plan = StateManager.loadPlan();
+            if (!plan) throw new Error("No plan exists.");
+
+            if (plan.status !== "reviewing_code") {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "orchestrate_complete_review may only be used when in the REVIEWING phase."
+                        }
+                    ],
+                    details: {}
+                };
+            }
+
+            // Transition to the VERIFYING phase
+            plan.status = "reviewing";
+            StateManager.savePlan(plan);
+
+            // Wake up the orchestrator model and enter final review
+            const reviewMessage = buildFinalReviewMessage(plan, "System: Code review complete. Entering FINAL REVIEW.");
+            notifyOrchestrator(getPi(), reviewMessage, { tuiVisible: false });
+
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: "Code review marked as complete. Proceeding to final review."
+                    }
+                ],
                 details: {}
             };
         }

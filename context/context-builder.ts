@@ -388,3 +388,50 @@ function readFileContents(files: string[], maxTotalBytes = 131072): string[] {
     }
     return results;
 }
+
+/**
+ * Build the prompt context for a code-review sub-agent.
+ */
+export function buildCodeReviewContext(
+    plan: OrchestrationPlan,
+    modifiedFiles: string[]
+): string {
+    const context: string[] = [];
+    context.push("You are the Code Reviewer. Perform a rigorous, critical code review of the modified or created files.");
+
+    context.push("\n## Project Goal");
+    appendJsonDataBlock(context, { project_goal: plan.goal });
+
+    // Inlined Implementation Plan
+    const implementationPlan = StateManager.loadImplementationPlan();
+    if (implementationPlan) {
+        context.push("\n## Implementation Plan");
+        context.push("Use the implementation plan as guidance for what was changed:");
+        context.push("```markdown");
+        context.push(implementationPlan);
+        context.push("```");
+    }
+
+    if (modifiedFiles.length > 0) {
+        context.push("\n## Modified or Created Files");
+        context.push("Please perform a full code review on all of these files:");
+        for (const f of modifiedFiles) {
+            context.push(`- ${f}`);
+        }
+    } else {
+        context.push("\n## Modified or Created Files");
+        context.push("No files are listed as modified/created in the tasks. Inspect the workspace directory.");
+    }
+
+    // Place the strict output instruction AFTER all injected content.
+    context.push("\n---\n");
+    context.push(
+        "Use your read tools to critically analyze the files and ensure correctness, clean code, security, and alignment with the project goal.\n" +
+        "You MUST call exactly one of the two special verdict tools when done:\n" +
+        "- If the code is correct, robust, and matches the plan, call: orchestrate_code_review_approve\n" +
+        "- If you find issues (bugs, critical omissions, bad practices), call: orchestrate_code_review_reject with a detailed review parameter.\n\n" +
+        "Do not write code, create files, or modify files yourself. Use your read-only tools for inspection, and then make the verdict tool call."
+    );
+
+    return context.join("\n");
+}

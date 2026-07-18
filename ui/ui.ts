@@ -148,6 +148,7 @@ const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
     PLANNING: "warning",
     REPLANNING: "warning",
     VERIFYING: "accent",
+    REVIEWING: "accent",
     PAUSED: "warning",
     STOPPED: "error",
     IDLE: "dim"
@@ -158,7 +159,8 @@ const PLAN_STATUS_COLORS: Record<string, SemanticColor> = {
     planning: "warning",
     pausing: "warning",
     failed: "error",
-    completed: "accent"
+    completed: "accent",
+    reviewing_code: "accent"
 };
 
 function resolveStatusLabelAndColor(
@@ -180,6 +182,10 @@ const PHASE_DETAIL_RENDERERS: Record<
     VERIFYING: (lines, _plan, t) => {
         lines.push(t.fg("warning", "  -> Awaiting final review by orchestrator"));
         lines.push(t.fg("dim", "  Use /om-resume to wake the reviewer if nothing happens"));
+    },
+    REVIEWING: (lines, _plan, t) => {
+        lines.push(t.fg("warning", "  -> Automated code review complete or actions required"));
+        lines.push(t.fg("dim", "  Read .pi/orchestration/plans/code-review.md for findings"));
     },
     REPLANNING: (lines, plan, t) => {
         const clarifyingTask = plan.tasks?.find((t2: Task) => t2.status === "awaiting_clarification");

@@ -8,7 +8,9 @@ import {
     resetState,
     beginShutdown,
     recoverInterruptedTasks,
-    requireActive
+    requireActive,
+    switchToReviewerModel,
+    restoreFromReviewPhase
 } from "./core";
 import {
     registerEnableCommand,
@@ -18,6 +20,7 @@ import {
 } from "./commands/commands";
 import { registerTools } from "./tools";
 import { registerValidatorTools } from "./tools/validator-tools";
+import { registerCodeReviewTools } from "./tools/code-review-tools";
 import { setupUIWidget, setOrchestrationEditor } from "./ui/ui";
 import { applySettingsToState } from "./settings/settings";
 import { formatTimeout } from "./settings/time-utils";
@@ -41,7 +44,8 @@ import {
 } from "./process/loop-detector";
 
 import { ORCHESTRATOR_PLANNING_SYSTEM_PROMPT, ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT,
-    PLANNING_HINT_PRE_WRITE } from "./context/prompts";
+    PLANNING_HINT_PRE_WRITE, ORCHESTRATOR_REVIEW_SYSTEM_PROMPT,
+    ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT } from "./context/prompts";
 
 /** Watchdog timer interval (ms) — checks for stalled orchestrator every 2 seconds during execution. */
 const WATCHDOG_INTERVAL_MS = 2000;
@@ -52,8 +56,9 @@ const DIALOG_RENDER_DELAY_MS = 100;
 
 export default function (pi: ExtensionAPI) {
     if (process.env.PI_ORCHESTRATION_SUB_AGENT === "true") {
-        // Validator sub-agents need the signal tools but nothing else.
+        // Sub-agents need their respective signal tools but nothing else.
         registerValidatorTools(pi);
+        registerCodeReviewTools(pi);
         return;
     }
 
@@ -184,7 +189,15 @@ export default function (pi: ExtensionAPI) {
             }
 
             // Select the appropriate prompt based on current phase.
+            if (OrchestratorState._inReviewPhase) {
+                return { systemPrompt: ORCHESTRATOR_REVIEW_SYSTEM_PROMPT };
+            }
+
             if (OrchestratorState.isExecuting) {
+                const plan = StateManager.loadPlan();
+                if (plan && plan.status === "reviewing_code") {
+                    return { systemPrompt: ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT };
+                }
                 return { systemPrompt: ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT };
             }
 
@@ -208,13 +221,20 @@ export default function (pi: ExtensionAPI) {
 
     /** Intercept planning tool results and replace them with the full plan from disk.
      *  Also injects contextual hints at key moments for guidance-in-the-moment pattern. */
-    pi.on("tool_result", async (event) => {
+    pi.on("tool_result", async (event, _ctx) => {
         if (!OrchestratorState.isActive || !OrchestratorState.planningMode || event.isError) return;
 
         if (event.toolName === "orchestrate_write_plan" || event.toolName === "orchestrate_edit_plan") {
             const planContent = StateManager.loadImplementationPlan();
-            // Flag that the plan was just updated - show Accept/Edit dialog on agent_settled.
-            OrchestratorState._planJustUpdated = true;
+
+            // If a reviewer model is configured AND we aren't currently incorporating review feedback,
+            // queue the review cycle instead of showing the Accept/Edit dialog immediately.
+            if (OrchestratorState.reviewerModel && !OrchestratorState._incorporatingFeedback) {
+                OrchestratorState._pendingReviewStart = true;
+            } else {
+                // Flag that the plan was just updated - show Accept/Edit dialog on agent_settled.
+                OrchestratorState._planJustUpdated = true;
+            }
 
             if (event.toolName === "orchestrate_write_plan") {
                 // Inject pre-write quality hint on first call (one-shot).
@@ -236,6 +256,9 @@ export default function (pi: ExtensionAPI) {
                     content: [{ type: "text", text: `--- Implementation Plan ---\n\n${planContent}` }]
                 };
             }
+        } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
+            // Reviewer finished — queue back to planning model and instruct planner to process review.
+            OrchestratorState._pendingReviewCompletion = true;
         }
     });
 
@@ -252,7 +275,58 @@ export default function (pi: ExtensionAPI) {
     /** Show Accept/Edit dialog only when the agent has fully settled (no retries/compaction/follow-ups left).
      *  This avoids false triggers from auto-retry or auto-compaction cycles that also fire turn_end. */
     pi.on("agent_settled", async (_event, ctx) => {
-        if (OrchestratorState._planJustUpdated && OrchestratorState.isActive && OrchestratorState.planningMode) {
+        if (!OrchestratorState.isActive || !OrchestratorState.planningMode) return;
+
+        if (OrchestratorState._pendingReviewStart) {
+            OrchestratorState._pendingReviewStart = false;
+            OrchestratorState._inReviewPhase = true;
+            try {
+                const success = await switchToReviewerModel(pi, ctx);
+                if (success) {
+                    await pi.sendMessage(
+                        {
+                            customType: "orchestrator_event",
+                            content: "System: You are now acting as the Plan Reviewer. Please review the implementation plan at .pi/orchestration/plans/implementation-plan.md and provide your assessment using orchestrate_review_plan. Be thorough in identifying missing steps, incorrect assumptions, or suboptimal approaches.",
+                            display: false
+                        },
+                        { triggerTurn: true }
+                    );
+                } else {
+                    OrchestratorState._inReviewPhase = false;
+                    OrchestratorState._planJustUpdated = true;
+                    await showAcceptOrEditDialog(pi, ctx);
+                }
+            } catch (e) {
+                console.error("Failed to switch to reviewer model:", e);
+                OrchestratorState._inReviewPhase = false;
+                OrchestratorState._planJustUpdated = true;
+                await showAcceptOrEditDialog(pi, ctx);
+            }
+            return;
+        }
+
+        if (OrchestratorState._pendingReviewCompletion) {
+            OrchestratorState._pendingReviewCompletion = false;
+            OrchestratorState._inReviewPhase = false;
+            OrchestratorState._incorporatingFeedback = true;
+            try {
+                await restoreFromReviewPhase(pi, ctx);
+                await pi.sendMessage(
+                    {
+                        customType: "orchestrator_event",
+                        content:
+                            "System: The reviewer has completed its assessment. Read .pi/orchestration/plans/plan-review.md for the review findings. If you agree with any issues or recommendations, use orchestrate_edit_plan to make improvements. Then call orchestrate_present_plan to show the final plan to the user and STOP IMMEDIATELY.",
+                        display: false
+                    },
+                    { triggerTurn: true }
+                );
+            } catch (e) {
+                console.error("Failed to restore from review phase:", e);
+            }
+            return;
+        }
+
+        if (OrchestratorState._planJustUpdated && !OrchestratorState._inReviewPhase) {
             OrchestratorState._planJustUpdated = false;
             // Small delay so the tool result has fully rendered before overlay appears.
             setTimeout(async () => {

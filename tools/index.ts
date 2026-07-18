@@ -4,6 +4,7 @@ import { registerTaskCrudTools } from "./task-crud";
 import { registerExecutionControlTools } from "./execution-control";
 import { registerReviewTools } from "./review-tools";
 import { registerValidatorTools } from "./validator-tools";
+import { registerCodeReviewTools } from "./code-review-tools";
 
 /** Register all orchestration tools by delegating to phase-specific modules. */
 export function registerTools(pi: ExtensionAPI) {
@@ -12,4 +13,5 @@ export function registerTools(pi: ExtensionAPI) {
     registerExecutionControlTools(pi);
     registerReviewTools(pi);
     registerValidatorTools(pi);
+    registerCodeReviewTools(pi);
 }

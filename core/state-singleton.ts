@@ -32,6 +32,8 @@ export const OrchestratorState = {
     validatorModel: null as ModelRef | null,
     orchestrationModel: null as ModelRef | null,
     planningModel: null as ModelRef | null,
+    reviewerModel: null as ModelRef | null,
+    codeReviewModel: null as ModelRef | null,
     summarizationConcurrency: 0,
     parallelTasks: 1,
     shuttingDown: false,
@@ -39,6 +41,8 @@ export const OrchestratorState = {
     originalMainModel: undefined as ModelRef | undefined,
     /** Model active before entering planning mode (orchestration or main) - restored when exiting planning. */
     prePlanningModel: undefined as ModelRef | undefined,
+    /** Model active before switching to the reviewer model - restored after review phase completes. */
+    preReviewModel: undefined as ModelRef | undefined,
     /** Original system prompt captured on first orchestration turn - restored on exit. */
     originalSystemPrompt: undefined as string | undefined,
     /** One-time flag: inject a restoration message on the next agent turn after exit. */
@@ -49,6 +53,15 @@ export const OrchestratorState = {
     _planJustUpdated: false,
     /** One-shot flag: pre-write quality hint sent. Fires once on first orchestrate_write_plan call. */
     _preWriteHintSent: false,
+    /** One-shot flag: true while the reviewer model is active during plan review cycle. */
+    _inReviewPhase: false,
+    /** Flag indicating that the planner is currently incorporating feedback from a recent review. 
+     *  While true, updates to the plan will not trigger a new automatic review cycle. */
+    _incorporatingFeedback: false,
+    /** One-shot flag: reviewer is scheduled to start on agent_settled. */
+    _pendingReviewStart: false,
+    /** One-shot flag: reviewer is scheduled to complete and switch back on agent_settled. */
+    _pendingReviewCompletion: false,
     /** Set to true when user explicitly pauses/stops. Disables the watchdog. */
     _manualPause: false,
     /** Reason for manual pause: 'pause' (/om-pause), 'stop' (/om-stop), or null (system/system-triggered pause) */
@@ -147,14 +160,21 @@ const STATE_DEFAULTS = {
     validatorModel: null as ModelRef | null,
     orchestrationModel: null as ModelRef | null,
     planningModel: null as ModelRef | null,
+    reviewerModel: null as ModelRef | null,
+    codeReviewModel: null as ModelRef | null,
     originalMainModel: undefined as ModelRef | undefined,
     prePlanningModel: undefined as ModelRef | undefined,
+    preReviewModel: undefined as ModelRef | undefined,
     shuttingDown: false,
     originalSystemPrompt: undefined as string | undefined,
     pendingSystemPromptRestore: false,
     shouldResetContext: false,
     _planJustUpdated: false,
     _preWriteHintSent: false,
+    _inReviewPhase: false,
+    _incorporatingFeedback: false,
+    _pendingReviewStart: false,
+    _pendingReviewCompletion: false,
     _manualPause: false,
     _pauseReason: null as "pause" | "stop" | null,
     allowStopTool: true,
@@ -322,6 +342,76 @@ export async function exitPlanningMode(
 }
 
 /**
+ * Switch to the configured reviewer model for plan review.
+ * Keeps conversation history intact (no context reset).
+ * Captures the currently active model so it can be restored via `restoreFromReviewPhase`.
+ */
+export async function switchToReviewerModel(
+    pi: ExtensionAPI,
+    ctx: { model?: ModelRef; modelRegistry: { find: (provider: string, id: string) => any }; ui?: { notify?: (...args: any[]) => void } }
+): Promise<boolean> {
+    // Capture the current active model before switching
+    if (ctx.model && OrchestratorState.preReviewModel === undefined) {
+        OrchestratorState.preReviewModel = { provider: ctx.model.provider, id: ctx.model.id };
+    }
+
+    const reviewerModel = OrchestratorState.reviewerModel;
+    if (!reviewerModel) return false;
+
+    const targetModel = ctx.modelRegistry.find(reviewerModel.provider, reviewerModel.id);
+    if (!targetModel) {
+        console.warn(`Reviewer model ${reviewerModel.provider}/${reviewerModel.id} not found in registry.`);
+        return false;
+    }
+
+    const success = await pi.setModel(targetModel);
+    if (success) {
+        ctx.ui?.notify?.(`Switched to reviewer model: ${reviewerModel.provider}/${reviewerModel.id}`, "info");
+    } else {
+        console.warn(`No API key available for reviewer model ${reviewerModel.provider}/${reviewerModel.id}.`);
+        ctx.ui?.notify?.(
+            `Cannot switch to reviewer model ${reviewerModel.provider}/${reviewerModel.id} - no configured API key.`,
+            "warning"
+        );
+    }
+    return success;
+}
+
+/**
+ * Restore the model that was active before the review phase.
+ * Called when exiting plan review (after reviewer completes its assessment).
+ */
+export async function restoreFromReviewPhase(
+    pi: ExtensionAPI,
+    ctx: { modelRegistry: { find: (provider: string, id: string) => any }; ui?: { notify?: (...args: any[]) => void } }
+): Promise<void> {
+    const pre = OrchestratorState.preReviewModel;
+    if (!pre) {
+        OrchestratorState.preReviewModel = undefined;
+        return;
+    }
+
+    const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
+    if (!targetModel) {
+        console.warn(`Pre-review model ${pre.provider}/${pre.id} not found in registry.`);
+        OrchestratorState.preReviewModel = undefined;
+        return;
+    }
+
+    const success = await pi.setModel(targetModel);
+    if (success) {
+        ctx.ui?.notify?.("Restored pre-review model.", "info");
+    } else {
+        console.warn(`No API key available for pre-review model ${pre.provider}/${pre.id}.`);
+        ctx.ui?.notify?.(
+            `Cannot restore pre-review model ${pre.provider}/${pre.id} - no configured API key.`,
+            "warning"
+        );
+    }
+    OrchestratorState.preReviewModel = undefined;
+}
+
+/**
  * Mark the orchestrator as shutting down. Runner close handlers check this flag
  * to avoid writing stale state after session_shutdown has begun.
  */
@@ -365,7 +455,7 @@ export function updateActiveTools(pi: ExtensionAPI) {
 }
 
 /** Orchestration tools that are safe to use during planning (plan file management). */
-const PLANNING_TOOLS = ["orchestrate_write_plan", "orchestrate_edit_plan", "orchestrate_present_plan"];
+const PLANNING_TOOLS = ["orchestrate_write_plan", "orchestrate_edit_plan", "orchestrate_present_plan", "orchestrate_review_plan"];
 
 /** Task manipulation tools - only available outside of planning mode. */
 const EXECUTION_TOOLS = [
@@ -381,11 +471,12 @@ const EXECUTION_TOOLS = [
     "orchestrate_resume_task",
     "orchestrate_stop",
     "orchestrate_approve_goal",
-    "orchestrate_bulk_update_tasks"
+    "orchestrate_bulk_update_tasks",
+    "orchestrate_complete_review"
 ];
 
 function getAllOrchestrationToolNames(): string[] {
-    return [...PLANNING_TOOLS, ...EXECUTION_TOOLS, VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL];
+    return [...PLANNING_TOOLS, ...EXECUTION_TOOLS, VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL, "orchestrate_code_review_approve", "orchestrate_code_review_reject"];
 }
 
 /**
@@ -430,6 +521,22 @@ export function resolveSummaryModel(fallback?: { provider: string; id: string })
 }
 
 /**
+ * Resolve the effective model for plan-review agents.
+ * Returns null if no reviewer model is configured (feature disabled).
+ */
+export function resolveReviewerModel(): ModelRef | null {
+    return OrchestratorState.reviewerModel;
+}
+
+/**
+ * Resolve the effective model for code-review agents.
+ * Returns null if no code-review model is configured (feature disabled).
+ */
+export function resolveCodeReviewModel(): ModelRef | null {
+    return OrchestratorState.codeReviewModel;
+}
+
+/**
  * Format a model for display, or return "(default)".
  */
 export function formatModel(m: ModelRef | null | undefined): string {
@@ -463,7 +570,7 @@ export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
 }
 
 /** Granular execution phase labels for the TUI status display. */
-export type ExecutionPhaseLabel = "PLANNING" | "EXECUTION" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "IDLE";
+export type ExecutionPhaseLabel = "PLANNING" | "EXECUTION" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "IDLE" | "REVIEWING";
 
 /**
  * Compute a granular execution phase label for display.
@@ -484,6 +591,7 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
 
     // Priority-ordered lookup: first matching condition wins
     const priorityChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
+        { check: () => plan.status === "reviewing_code", label: "REVIEWING" },
         { check: () => plan.status === "reviewing", label: "VERIFYING" },
         { check: () => OrchestratorState._pauseReason === "stop" && plan.status === "paused", label: "STOPPED" },
         {
@@ -525,42 +633,45 @@ export function stripTaskPrefix(id: string): string {
     return id.startsWith("task_") ? id.slice(5) : id;
 }
 
-/** Truncate a task description to its first sentence for compact display.
- *  Finds the first `. ` (period + space or newline) and cuts there.
- *  Falls back to a hard character limit if no sentence boundary is found. */
+/** Truncate a task description to a single displayable line for compact status views.
+ *  Pipeline:
+ *    1) Hard truncate at maxChars
+ *    2) Strip everything from the first newline / carriage return onwards
+ *    3) If a `. ` (period + space) is found, strip from there (keep the period)
+ *    4) If result is exactly maxChars long, replace last char with ellipsis
+ *    5) Return what remains trimmed */
 export function truncateToSentence(text: string, maxChars: number = 120): string {
-    const periodSpaceIdx = text.indexOf(". ");
-    const periodNewlineIdx = text.indexOf(".\n");
+    // 1. Hard truncate — nothing longer than maxChars
+    let s = text.length > maxChars ? text.slice(0, maxChars) : text;
 
-    // Find the earliest valid sentence boundary (both must be >= 0)
-    const candidates = [periodSpaceIdx, periodNewlineIdx].filter((i) => i >= 0);
-    if (candidates.length === 0) {
-        // No sentence boundary - stop at the first line break or hard limit
-        const nlIdx = text.indexOf('\n');
-        const crIdx = text.indexOf('\r');
-        const lineBreak = [nlIdx, crIdx].filter((i) => i >= 0).length > 0 ? Math.min(...[nlIdx, crIdx].filter(i => i >= 0)) : Infinity;
-
-        if (lineBreak < maxChars) {
-            return text.slice(0, lineBreak).trim();
-        }
-
-        return text.length > maxChars ? text.slice(0, maxChars).trim() + "\u2026" : text;
+    // 2. Strip from first newline / carriage return onwards (guarantee single line)
+    const nlIdx = s.indexOf('\n');
+    const crIdx = s.indexOf('\r');
+    let cut: number | undefined;
+    if (nlIdx >= 0 && crIdx >= 0) {
+        cut = Math.min(nlIdx, crIdx);
+    } else if (nlIdx >= 0) {
+        cut = nlIdx;
+    } else if (crIdx >= 0) {
+        cut = crIdx;
+    }
+    if (cut !== undefined) {
+        s = s.slice(0, cut);
     }
 
-    const cutAt = Math.min(...candidates) + 1; // +1 to include the period
-    if (cutAt <= maxChars) {
-        return text.slice(0, cutAt);
+    // 3. Find first `. ` and strip from there (keep the period)
+    const periodSpaceIdx = s.indexOf('. ');
+    if (periodSpaceIdx >= 0) {
+        s = s.slice(0, periodSpaceIdx + 1); // include the dot
     }
 
-    // Boundary found but exceeds maxChars - stop at first line break or hard truncate
-    const nlIdx = text.indexOf('\n');
-    const crIdx = text.indexOf('\r');
-    const lineBreaks = [nlIdx, crIdx].filter((i) => i >= 0);
-    if (lineBreaks.length > 0 && Math.min(...lineBreaks) < maxChars) {
-        return text.slice(0, Math.min(...lineBreaks)).trim();
+    // 4. If we ended up at exactly maxChars, the text was hard-truncated —
+    //    replace the last character with an ellipsis (no length increase).
+    if (s.length === maxChars) {
+        s = s.slice(0, -1) + "\u2026";
     }
 
-    return text.length > maxChars ? text.slice(0, maxChars).trim() + "\u2026" : text;
+    return s.trim();
 }
 
 /**
@@ -648,6 +759,8 @@ export function setModelRef(
         | "validatorModel"
         | "orchestrationModel"
         | "planningModel"
+        | "reviewerModel"
+        | "codeReviewModel"
     >,
     value: ModelRef | null
 ): void {

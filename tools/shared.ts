@@ -165,8 +165,8 @@ export function requirePlanNotExecuting() {
     if (!plan) throw new Error("No plan exists.");
     // Block task modification during active execution - orchestrator must call
     // orchestrate_replan first to shift into recovery mode (status: "planning").
-    // Allowed in: "planning" (recovery), "paused", "reviewing" (final verification).
-    const allowedStatuses = new Set(["planning", "paused", "reviewing"]);
+    // Allowed in: "planning" (recovery), "paused", "reviewing" (final verification), "reviewing_code".
+    const allowedStatuses = new Set(["planning", "paused", "reviewing", "reviewing_code"]);
     if (!allowedStatuses.has(plan.status)) {
         throw new Error(
             `Blocked during active execution (${plan.status}). Call orchestrate_replan first to enter recovery mode.`

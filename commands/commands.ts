@@ -95,6 +95,22 @@ function handleResumeReview(_plan: OrchestrationPlan, pi: ExtensionAPI) {
     );
 }
 
+function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
+    // Resuming from code-review phase (reviewing_code).
+    // Re-run the code review sub-agent. If it fails again, fall through to normal review.
+    sendResumeMessage(
+        pi,
+        `System: Resuming from REVIEWING state. Code review was interrupted — re-running automated code review.`
+    );
+
+    // Set status back so the runner can pick up the code-review flow via finishPlan
+    plan.status = "executing";
+    StateManager.savePlan(plan);
+    Runner.runTasks(pi).catch((err: Error) => {
+        console.error("Code review resume error:", err);
+    });
+}
+
 function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI) {
     const clarifyingTask = (plan.tasks || []).find((t: Task) => t.status === "awaiting_clarification");
     if (clarifyingTask) {
@@ -107,6 +123,12 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
 
     const next = findNextTaskToRun(plan);
     if (!next) {
+        if (OrchestratorState.codeReviewModel) {
+            plan.status = "executing";
+            StateManager.savePlan(plan);
+            Runner.runTasks(pi);
+            return;
+        }
         plan.status = "reviewing";
         StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
@@ -168,6 +190,7 @@ function resumePlanExecution(_stalePlan: unknown, pi: ExtensionAPI) {
 
     const handlers: Record<string, (p: OrchestrationPlan, pi: ExtensionAPI) => void> = {
         reviewing: handleResumeReview,
+        reviewing_code: handleResumeCodeReview,
         executing: handleResumeExecutingOrPaused,
         paused: handleResumeExecutingOrPaused,
         planning: handleResumePlanning,
@@ -380,6 +403,15 @@ function extractGoalFromMarkdown(content: string): string {
  * Shared by /om-accept command and the Accept/Edit dialog overlay.
  */
 export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionContext) {
+    // Guard: review phase must not be active
+    if (OrchestratorState._inReviewPhase) {
+        ctx.ui.notify(
+            "Plan review is in progress — please wait for it to complete.",
+            "info"
+        );
+        return;
+    }
+
     // Guard: implementation-plan.md must exist and have content.
     const implPlan = StateManager.loadImplementationPlan();
     if (!implPlan || !implPlan.trim()) {
@@ -451,6 +483,15 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
  * Show the Accept/Edit dialog overlay after a plan was written/edited.
  */
 export async function showAcceptOrEditDialog(pi: ExtensionAPI, ctx: ExtensionContext) {
+    // Guard: review phase must not be active
+    if (OrchestratorState._inReviewPhase) {
+        ctx.ui.notify(
+            "Plan review is in progress — please wait for it to complete.",
+            "info"
+        );
+        return;
+    }
+
     const result = await ctx.ui.custom<{
         accepted?: boolean;
         cancelled?: boolean;
@@ -487,6 +528,7 @@ export async function showAcceptOrEditDialog(pi: ExtensionAPI, ctx: ExtensionCon
     if (result.accepted) {
         startExecutionFromPlan(pi, ctx);
     } else if (result.feedback && result.feedback.trim()) {
+        OrchestratorState._incorporatingFeedback = false; // User input breaks the automatic review loop
         /* Send user feedback back to the agent so it can refine the plan.
          * Prepended with PLANNING_HINT_EDIT for thoroughness guidance-in-the-moment.
          * display: false avoids the [undefined] source label since the user's input
@@ -698,6 +740,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 await exitPlanningMode(pi, ctx);
                 OrchestratorState._manualPause = false;
                 OrchestratorState._pauseReason = null;
+                OrchestratorState._inReviewPhase = false;
                 setOrchestrationMode(OrchestratorState.isActive, false, false, pi, refreshBorder);
                 ctx.ui.notify("Orchestration plan cleared. Describe a new goal to start planning.", "info");
             }
