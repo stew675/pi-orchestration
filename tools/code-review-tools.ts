@@ -5,6 +5,8 @@ import { StateManager } from "../context/state-manager";
 /** Tool names used by code-review sub-agents to signal verdict. */
 export const CODE_REVIEW_APPROVE_TOOL = "orchestrate_code_review_approve";
 export const CODE_REVIEW_REJECT_TOOL = "orchestrate_code_review_reject";
+/** Comma-separated tool string for passing via `--tools` when spawning a code-review sub-agent. */
+export const CODE_REVIEW_TOOLS = `${CODE_REVIEW_APPROVE_TOOL},${CODE_REVIEW_REJECT_TOOL}` as const;
 
 /** Register the code review tools. These tools are used only by the code-review sub-agent. */
 export function registerCodeReviewTools(pi: ExtensionAPI) {

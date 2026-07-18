@@ -20,6 +20,7 @@ import {
 } from "./commands/commands";
 import { registerTools } from "./tools";
 import { registerValidatorTools } from "./tools/validator-tools";
+import { registerCodeReviewTools } from "./tools/code-review-tools";
 import { setupUIWidget, setOrchestrationEditor } from "./ui/ui";
 import { applySettingsToState } from "./settings/settings";
 import { formatTimeout } from "./settings/time-utils";
@@ -55,8 +56,9 @@ const DIALOG_RENDER_DELAY_MS = 100;
 
 export default function (pi: ExtensionAPI) {
     if (process.env.PI_ORCHESTRATION_SUB_AGENT === "true") {
-        // Validator sub-agents need the signal tools but nothing else.
+        // Sub-agents need their respective signal tools but nothing else.
         registerValidatorTools(pi);
+        registerCodeReviewTools(pi);
         return;
     }
 

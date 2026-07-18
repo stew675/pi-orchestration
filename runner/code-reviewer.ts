@@ -7,6 +7,11 @@ import * as monitor from "../process/monitor";
 import { spawnAgent } from "../process/process-manager";
 import { buildCodeReviewContext } from "../context/context-builder";
 import { formatTimeout } from "../settings/time-utils";
+import {
+    CODE_REVIEW_TOOLS,
+    CODE_REVIEW_APPROVE_TOOL,
+    CODE_REVIEW_REJECT_TOOL
+} from "../tools/code-review-tools";
 import * as fs from "fs";
 
 /** Spawn the code-review sub-agent and wait for it to complete. */
@@ -47,7 +52,7 @@ export async function runCodeReview(
     const monitorId = "code-review";
 
     return await new Promise((resolve) => {
-        const toolsArg = "read,ls,find,grep,orchestrate_code_review_approve,orchestrate_code_review_reject";
+        const toolsArg = `read,ls,find,grep,${CODE_REVIEW_TOOLS}`;
 
         const args = ["--mode", "json", "--no-session", "--tools", toolsArg, "--append-system-prompt", promptPath];
         args.push("--model", `${model.provider}/${model.id}`);
@@ -73,9 +78,9 @@ export async function runCodeReview(
 
                 if (verdict === null && (event.type === "tool_call" || event.type === "tool_execution_start")) {
                     const toolName = getEventToolName(event);
-                    if (toolName === "orchestrate_code_review_approve") {
+                    if (toolName === CODE_REVIEW_APPROVE_TOOL) {
                         verdict = "approve";
-                    } else if (toolName === "orchestrate_code_review_reject") {
+                    } else if (toolName === CODE_REVIEW_REJECT_TOOL) {
                         verdict = "reject";
                     }
                 }

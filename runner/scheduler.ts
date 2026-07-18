@@ -192,12 +192,15 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
 
             try {
                 const { runCodeReview } = await import("./code-reviewer");
+                // Note: the returned { approved, feedback } is intentionally ignored.
+                // Tool call results can occasionally fail due to model inconsistencies —
+                // we trust the disk file (written by the tool execute handler) as source of truth.
                 await runCodeReview(pi, codeReviewModel);
             } catch (err) {
                 console.error("Code review execution failed:", err);
             }
 
-            // Inspect the resulting code-review.md file on disk
+            // Inspect the resulting code-review.md file on disk (source of truth)
             let approved = false;
             const codeReviewPath = StateManager.getCodeReviewPath();
             if (fs.existsSync(codeReviewPath)) {
