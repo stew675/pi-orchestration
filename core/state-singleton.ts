@@ -611,42 +611,45 @@ export function stripTaskPrefix(id: string): string {
     return id.startsWith("task_") ? id.slice(5) : id;
 }
 
-/** Truncate a task description to its first sentence for compact display.
- *  Finds the first `. ` (period + space or newline) and cuts there.
- *  Falls back to a hard character limit if no sentence boundary is found. */
+/** Truncate a task description to a single displayable line for compact status views.
+ *  Pipeline:
+ *    1) Hard truncate at maxChars
+ *    2) Strip everything from the first newline / carriage return onwards
+ *    3) If a `. ` (period + space) is found, strip from there (keep the period)
+ *    4) If result is exactly maxChars long, replace last char with ellipsis
+ *    5) Return what remains trimmed */
 export function truncateToSentence(text: string, maxChars: number = 120): string {
-    const periodSpaceIdx = text.indexOf(". ");
-    const periodNewlineIdx = text.indexOf(".\n");
+    // 1. Hard truncate — nothing longer than maxChars
+    let s = text.length > maxChars ? text.slice(0, maxChars) : text;
 
-    // Find the earliest valid sentence boundary (both must be >= 0)
-    const candidates = [periodSpaceIdx, periodNewlineIdx].filter((i) => i >= 0);
-    if (candidates.length === 0) {
-        // No sentence boundary - stop at the first line break or hard limit
-        const nlIdx = text.indexOf('\n');
-        const crIdx = text.indexOf('\r');
-        const lineBreak = [nlIdx, crIdx].filter((i) => i >= 0).length > 0 ? Math.min(...[nlIdx, crIdx].filter(i => i >= 0)) : Infinity;
-
-        if (lineBreak < maxChars) {
-            return text.slice(0, lineBreak).trim();
-        }
-
-        return text.length > maxChars ? text.slice(0, maxChars).trim() + "\u2026" : text;
+    // 2. Strip from first newline / carriage return onwards (guarantee single line)
+    const nlIdx = s.indexOf('\n');
+    const crIdx = s.indexOf('\r');
+    let cut: number | undefined;
+    if (nlIdx >= 0 && crIdx >= 0) {
+        cut = Math.min(nlIdx, crIdx);
+    } else if (nlIdx >= 0) {
+        cut = nlIdx;
+    } else if (crIdx >= 0) {
+        cut = crIdx;
+    }
+    if (cut !== undefined) {
+        s = s.slice(0, cut);
     }
 
-    const cutAt = Math.min(...candidates) + 1; // +1 to include the period
-    if (cutAt <= maxChars) {
-        return text.slice(0, cutAt);
+    // 3. Find first `. ` and strip from there (keep the period)
+    const periodSpaceIdx = s.indexOf('. ');
+    if (periodSpaceIdx >= 0) {
+        s = s.slice(0, periodSpaceIdx + 1); // include the dot
     }
 
-    // Boundary found but exceeds maxChars - stop at first line break or hard truncate
-    const nlIdx = text.indexOf('\n');
-    const crIdx = text.indexOf('\r');
-    const lineBreaks = [nlIdx, crIdx].filter((i) => i >= 0);
-    if (lineBreaks.length > 0 && Math.min(...lineBreaks) < maxChars) {
-        return text.slice(0, Math.min(...lineBreaks)).trim();
+    // 4. If we ended up at exactly maxChars, the text was hard-truncated —
+    //    replace the last character with an ellipsis (no length increase).
+    if (s.length === maxChars) {
+        s = s.slice(0, -1) + "\u2026";
     }
 
-    return text.length > maxChars ? text.slice(0, maxChars).trim() + "\u2026" : text;
+    return s.trim();
 }
 
 /**
