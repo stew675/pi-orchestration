@@ -33,6 +33,7 @@ export const OrchestratorState = {
     orchestrationModel: null as ModelRef | null,
     planningModel: null as ModelRef | null,
     reviewerModel: null as ModelRef | null,
+    codeReviewModel: null as ModelRef | null,
     summarizationConcurrency: 0,
     parallelTasks: 1,
     shuttingDown: false,
@@ -160,6 +161,7 @@ const STATE_DEFAULTS = {
     orchestrationModel: null as ModelRef | null,
     planningModel: null as ModelRef | null,
     reviewerModel: null as ModelRef | null,
+    codeReviewModel: null as ModelRef | null,
     originalMainModel: undefined as ModelRef | undefined,
     prePlanningModel: undefined as ModelRef | undefined,
     preReviewModel: undefined as ModelRef | undefined,
@@ -469,11 +471,12 @@ const EXECUTION_TOOLS = [
     "orchestrate_resume_task",
     "orchestrate_stop",
     "orchestrate_approve_goal",
-    "orchestrate_bulk_update_tasks"
+    "orchestrate_bulk_update_tasks",
+    "orchestrate_complete_review"
 ];
 
 function getAllOrchestrationToolNames(): string[] {
-    return [...PLANNING_TOOLS, ...EXECUTION_TOOLS, VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL];
+    return [...PLANNING_TOOLS, ...EXECUTION_TOOLS, VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL, "orchestrate_code_review_approve", "orchestrate_code_review_reject"];
 }
 
 /**
@@ -526,6 +529,14 @@ export function resolveReviewerModel(): ModelRef | null {
 }
 
 /**
+ * Resolve the effective model for code-review agents.
+ * Returns null if no code-review model is configured (feature disabled).
+ */
+export function resolveCodeReviewModel(): ModelRef | null {
+    return OrchestratorState.codeReviewModel;
+}
+
+/**
  * Format a model for display, or return "(default)".
  */
 export function formatModel(m: ModelRef | null | undefined): string {
@@ -559,7 +570,7 @@ export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
 }
 
 /** Granular execution phase labels for the TUI status display. */
-export type ExecutionPhaseLabel = "PLANNING" | "EXECUTION" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "IDLE";
+export type ExecutionPhaseLabel = "PLANNING" | "EXECUTION" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "IDLE" | "REVIEWING";
 
 /**
  * Compute a granular execution phase label for display.
@@ -580,6 +591,7 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
 
     // Priority-ordered lookup: first matching condition wins
     const priorityChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
+        { check: () => plan.status === "reviewing_code", label: "REVIEWING" },
         { check: () => plan.status === "reviewing", label: "VERIFYING" },
         { check: () => OrchestratorState._pauseReason === "stop" && plan.status === "paused", label: "STOPPED" },
         {
@@ -748,6 +760,7 @@ export function setModelRef(
         | "orchestrationModel"
         | "planningModel"
         | "reviewerModel"
+        | "codeReviewModel"
     >,
     value: ModelRef | null
 ): void {

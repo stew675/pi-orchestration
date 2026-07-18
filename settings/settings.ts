@@ -20,7 +20,8 @@ const MODEL_KEYS = [
     "validatorModel",
     "orchestrationModel",
     "planningModel",
-    "reviewerModel"
+    "reviewerModel",
+    "codeReviewModel"
 ] as const;
 
 /** Keys that hold numeric concurrency values. */
@@ -52,6 +53,7 @@ interface OrchestrationSettings {
     orchestrationModel?: ModelRef;
     planningModel?: ModelRef;
     reviewerModel?: ModelRef;
+    codeReviewModel?: ModelRef;
     summarizationConcurrency?: number;
     parallelTasks?: number;
     // Timeouts stored as human-readable strings (e.g. "12m", "4m30s")

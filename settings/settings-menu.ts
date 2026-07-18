@@ -28,6 +28,7 @@ const MODEL_SCOPES: Record<
             | "validatorModel"
             | "summaryModel"
             | "reviewerModel"
+            | "codeReviewModel"
         >;
         label: string;
     }
@@ -38,7 +39,8 @@ const MODEL_SCOPES: Record<
     complexTask: { key: "complexTaskModel", label: "Complex task model" },
     validator: { key: "validatorModel", label: "Validator model" },
     summary: { key: "summaryModel", label: "Summary model" },
-    reviewer: { key: "reviewerModel", label: "Plan review model" }
+    reviewer: { key: "reviewerModel", label: "Plan review model" },
+    codeReview: { key: "codeReviewModel", label: "Code review model" }
 };
 
 /**
@@ -65,6 +67,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 `  Validator:             ${formatModel(OrchestratorState.validatorModel)}\n` +
                 `  Summary:               ${formatModel(OrchestratorState.summaryModel)}\n` +
                 `  Reviewer:              ${formatModel(OrchestratorState.reviewerModel) || "(disabled)"}\n` +
+                `  Code Review:           ${formatModel(OrchestratorState.codeReviewModel) || "(disabled)"}\n` +
                 `  Summary concurrency:   ${OrchestratorState.summarizationConcurrency}\n` +
                 `  Parallel tasks:        ${OrchestratorState.parallelTasks}\n` +
                 `  Task timeout:          ${formatTimeout(OrchestratorState.taskTimeoutMs)}\n` +
@@ -82,6 +85,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 `  /om-settings complex-task <provider/model>\n` +
                 `  /om-settings validator <provider/model>\n` +
                 `  /om-settings summary <provider/model>\n` +
+                `  /om-settings code-review <provider/model>\n` +
                 `  /om-settings default`,
             "info"
         );
@@ -97,6 +101,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         const validatorStr = formatModel(OrchestratorState.validatorModel);
         const summaryStr = formatModel(OrchestratorState.summaryModel);
         const reviewerStr = formatModel(OrchestratorState.reviewerModel) || "(disabled)";
+        const codeReviewStr = formatModel(OrchestratorState.codeReviewModel) || "(disabled)";
         const concStr = OrchestratorState.summarizationConcurrency.toString();
         const parallelTasksStr = OrchestratorState.parallelTasks.toString();
 
@@ -119,6 +124,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
             { value: "validator-model", label: `Validator model (${validatorStr})` },
             { value: "summary-model", label: `Summary model (${summaryStr})` },
             { value: "reviewer-model", label: `Plan review model (${reviewerStr})` },
+            { value: "code-review-model", label: `Code review model (${codeReviewStr})` },
             { value: "summarization-concurrency", label: `Summarization concurrency (${concStr})` },
             { value: "parallel-tasks", label: `Parallel tasks (${parallelTasksStr})` },
             { value: "timeout-task", label: `Task timeout (${taskTimeoutStr})` },
@@ -185,6 +191,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         "validator-model": () => handleModelSelection(ctx, pi, "validator"),
         "summary-model": () => handleModelSelection(ctx, pi, "summary"),
         "reviewer-model": () => handleReviewerModelSelection(ctx, pi),
+        "code-review-model": () => handleCodeReviewModelSelection(ctx, pi),
         "summarization-concurrency": async () => {
             await handleNumberInput(
                 ctx,
@@ -660,5 +667,100 @@ async function handleSubAgentIdleTimeoutInput(ctx: ExtensionContext): Promise<vo
         ctx.ui.notify(`Sub-agent idle timeout set to ${formatTimeout(ms)}.`, "info");
     } catch (err) {
         ctx.ui.notify(`Invalid timeout: ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+}
+
+/**
+ * Open a custom code-review model picker that includes a "(None)" sentinel option.
+ */
+interface CodeReviewPickerItem {
+    none?: boolean;
+    provider?: string;
+    id?: string;
+}
+async function handleCodeReviewModelSelection(
+    ctx: ExtensionContext,
+    _pi: ExtensionAPI
+): Promise<void> {
+    try {
+        const availableModels = await ctx.modelRegistry.getAvailable();
+        if (availableModels.length === 0) {
+            OrchestratorState.codeReviewModel = null;
+            persistSettings(OrchestratorState);
+            ctx.ui.notify("Code review disabled (no models available).", "info");
+            return;
+        }
+
+        const items: CodeReviewPickerItem[] = [
+            { none: true },
+            ...availableModels.map((m) => ({ provider: m.provider, id: m.id }))
+        ];
+
+        const selected = await ctx.ui.custom<CodeReviewPickerItem | null>(
+            (tui, theme, _keybindings, done) => {
+                const container = new Container();
+
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+                container.addChild(new Text(theme.fg("accent", theme.bold("Select Code Review Model")), 1, 0));
+                container.addChild(new Text(
+                    theme.fg("muted", `Current: ${formatModel(OrchestratorState.codeReviewModel) || "(disabled)"}`),
+                    1, 0
+                ));
+
+                const displayItems: SelectItem[] = items.map((item, index) => {
+                    if (item.none) {
+                        return { value: String(index), label: "(None) — disable code review" };
+                    }
+                    return {
+                        value: String(index),
+                        label: `${item.provider}/${item.id}`
+                    };
+                });
+
+                const selectList = new SelectList(displayItems, Math.min(displayItems.length, 12), {
+                    selectedPrefix: (t) => theme.fg("accent", t),
+                    selectedText: (t) => theme.fg("accent", t),
+                    description: (t) => theme.fg("muted", t),
+                    scrollInfo: (t) => theme.fg("dim", t),
+                    noMatch: (t) => theme.fg("warning", t)
+                });
+
+                selectList.onSelect = (item) => {
+                    const idx = parseInt(item.value, 10);
+                    done(items[idx] || null);
+                };
+                selectList.onCancel = () => done(null);
+
+                container.addChild(selectList);
+                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel"), 1, 0));
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+                return {
+                    render: (w) => container.render(w),
+                    invalidate: () => container.invalidate(),
+                    handleInput: (data) => {
+                        selectList.handleInput(data);
+                        tui.requestRender();
+                    }
+                };
+            },
+            { overlay: true, overlayOptions: { anchor: "center", width: "50%", margin: 2 } }
+        );
+
+        if (!selected) return;
+
+        if (selected.none) {
+            OrchestratorState.codeReviewModel = null;
+            persistSettings(OrchestratorState);
+            ctx.ui.notify("Code review disabled.", "info");
+        } else if (selected.provider && selected.id) {
+            OrchestratorState.codeReviewModel = { provider: selected.provider, id: selected.id };
+            persistSettings(OrchestratorState);
+            ctx.ui.notify(`Code review model set to ${selected.provider}/${selected.id}.`, "info");
+        }
+    } catch (err) {
+        console.error("Code reviewer model picker error:", err);
+        ctx.ui.notify(`Error opening code reviewer model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
 }

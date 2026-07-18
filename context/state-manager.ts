@@ -160,7 +160,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     const plan = obj as Record<string, unknown>;
     if (typeof plan.goal !== "string") return false;
 
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed"];
+    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
     if (!validStatuses.includes(plan.status as string)) return false;
 
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
@@ -209,7 +209,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
         console.warn("Plan recovery failed: missing or invalid 'goal' field");
         return null;
     }
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed"];
+    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
     if (!validStatuses.includes(plan.status as string)) {
         console.warn(`Plan recovery failed: invalid status ${JSON.stringify(plan.status)}`);
         return null;
@@ -783,5 +783,38 @@ export class StateManager {
         const filePath = getPlanReviewPath();
         safeWriteFile(filePath, content);
         cachedPlanReview = content; // update in-memory cache
+    }
+
+    /** Path to code-review.md */
+    static getCodeReviewPath(): string {
+        return getOrchestrationPath("plans", "code-review.md");
+    }
+
+    /** Load code-review.md if it exists. */
+    static loadCodeReview(): string | null {
+        const filePath = this.getCodeReviewPath();
+        if (fs.existsSync(filePath)) {
+            return fs.readFileSync(filePath, "utf-8");
+        }
+        return null;
+    }
+
+    /** Save (overwrite) code-review.md */
+    static saveCodeReview(content: string): void {
+        this.initDirs();
+        const filePath = this.getCodeReviewPath();
+        safeWriteFile(filePath, content);
+    }
+
+    /** Delete code-review.md */
+    static deleteCodeReview(): void {
+        const filePath = this.getCodeReviewPath();
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+            } catch (err) {
+                console.error(`Failed to delete code-review.md:`, err);
+            }
+        }
     }
 }

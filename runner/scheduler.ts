@@ -4,6 +4,7 @@ import { ACTIVE_TASK_STATUSES } from "../core/types";
 import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
 import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage } from "./utils";
+import * as fs from "fs";
 
 // ---------------------------------------------------------------------------
 // Scheduling lock - ensures only one scheduling decision runs at a time.
@@ -179,13 +180,72 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
 
     // All tasks completed - enter final review (must wake orchestrator)
     if (finalPlan.tasks.every((t) => t.status === "completed")) {
-        finalPlan.status = "reviewing";
-        savePlanSafely(finalPlan);
+        const codeReviewModel = OrchestratorState.codeReviewModel;
+        if (codeReviewModel) {
+            finalPlan.status = "reviewing_code";
+            savePlanSafely(finalPlan);
 
-        // Build a contextual wakeup message with task summaries so the orchestrator
-        // has everything it needs to decide - no need for redundant verification tasks.
-        const reviewMessage = buildFinalReviewMessage(finalPlan);
-        notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
+            // Delete old code-review.md if present
+            StateManager.deleteCodeReview();
+
+            notifyOrchestrator(pi, "System: Starting automated Code Review...", { tuiVisible: true });
+
+            try {
+                const { runCodeReview } = await import("./code-reviewer");
+                await runCodeReview(pi, codeReviewModel);
+            } catch (err) {
+                console.error("Code review execution failed:", err);
+            }
+
+            // Inspect the resulting code-review.md file on disk
+            let approved = false;
+            const codeReviewPath = StateManager.getCodeReviewPath();
+            if (fs.existsSync(codeReviewPath)) {
+                const content = fs.readFileSync(codeReviewPath, "utf-8");
+                if (content.split("\n")[0].trim() === "APPROVED") {
+                    approved = true;
+                }
+            }
+
+            if (approved) {
+                // If approved, proceed to final verification just like today
+                const updatedPlan = StateManager.loadPlan();
+                if (updatedPlan) {
+                    updatedPlan.status = "reviewing";
+                    savePlanSafely(updatedPlan);
+                    const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
+                    notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
+                }
+            } else {
+                // If changes needed, remain in reviewing_code phase and notify orchestrator
+                const updatedPlan = StateManager.loadPlan();
+                if (updatedPlan) {
+                    updatedPlan.status = "reviewing_code";
+                    savePlanSafely(updatedPlan);
+
+                    const wakeMessage = [
+                        "System: Code review complete. Changes are required before final approval.",
+                        "Please read the .pi/orchestration/plans/code-review.md file and take action upon the contents of that file.",
+                        "",
+                        "Review Instructions for Orchestrator:",
+                        "1. Analyze the true priority of the recommendations within the code review.",
+                        "2. Ignore all items of Low priority or lower.",
+                        "3. Analyze the remaining items for false-positives and reject those.",
+                        "4. If any review items remain, issue remedial tasks to correct them (use orchestrate_add_task, orchestrate_edit_task, etc., and then orchestrate_start_task).",
+                        "5. If you find that nothing in the code-review requires further action, you MUST call orchestrate_complete_review to exit the REVIEWING phase."
+                    ].join("\n");
+                    notifyOrchestrator(pi, wakeMessage, { tuiVisible: true });
+                }
+            }
+        } else {
+            finalPlan.status = "reviewing";
+            savePlanSafely(finalPlan);
+
+            // Build a contextual wakeup message with task summaries so the orchestrator
+            // has everything it needs to decide - no need for redundant verification tasks.
+            const reviewMessage = buildFinalReviewMessage(finalPlan);
+            notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
+        }
     }
 }
 

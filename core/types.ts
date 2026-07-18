@@ -41,7 +41,7 @@ export function isTaskReadOnly(taskType?: TaskType): boolean {
 
 export interface OrchestrationPlan {
     goal: string;
-    status: "planning" | "executing" | "pausing" | "paused" | "reviewing" | "completed" | "failed";
+    status: "planning" | "executing" | "pausing" | "paused" | "reviewing" | "completed" | "failed" | "reviewing_code";
     currentTaskId?: string;
     tasks: Task[];
 }

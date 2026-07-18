@@ -107,6 +107,12 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
 
     const next = findNextTaskToRun(plan);
     if (!next) {
+        if (OrchestratorState.codeReviewModel) {
+            plan.status = "executing";
+            StateManager.savePlan(plan);
+            Runner.runTasks(pi);
+            return;
+        }
         plan.status = "reviewing";
         StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
