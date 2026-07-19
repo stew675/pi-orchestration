@@ -15,7 +15,9 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
         planning: "planning",
         reviewing: "planning",
         reviewed: "planning",
+        setup: "setup",
         implementing: "implementing",
+        replanning: "replanning",
         pausing: "pausing",
         paused: "paused",
         resuming: "implementing",
@@ -180,7 +182,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     const plan = obj as Record<string, unknown>;
     if (typeof plan.goal !== "string") return false;
 
-    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review"];
+    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review", "setup", "replanning"];
     if (!validStatuses.includes(plan.status as string)) return false;
 
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
@@ -229,7 +231,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
         console.warn("Plan recovery failed: missing or invalid 'goal' field");
         return null;
     }
-    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review"];
+    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review", "setup", "replanning"];
     if (!validStatuses.includes(plan.status as string)) {
         console.warn(`Plan recovery failed: invalid status ${JSON.stringify(plan.status)}`);
         return null;

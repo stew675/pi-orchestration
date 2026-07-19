@@ -447,7 +447,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     // Clear planning hint flags — no longer in planning
     OrchestratorState._preWriteHintSent = false;
 
-    setOrchestrationMode("implementing", pi, refreshBorder);
+    setOrchestrationMode("setup", pi, refreshBorder);
 
     // Inject the full implementation plan directly into the wake-up message so it
     // survives context pruning and avoids system-prompt per-message token limits.
@@ -456,6 +456,10 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
 
     const plan = StateManager.loadPlan();
     if (plan && plan.status !== "completed" && plan.tasks.length > 0) {
+        if (!transitionTo("setup", plan)) {
+            console.warn("Failed to transition to setup state in startExecutionFromPlan");
+        }
+        StateManager.savePlan(plan);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
         ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
         pi.sendMessage(
@@ -467,13 +471,13 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             { triggerTurn: true }
         );
     } else {
-        // Pre-initialize the plan with status "planning" so the orchestrator
+        // Pre-initialize the plan with status "setup" so the orchestrator
         // can call orchestrate_add_task. Status transitions to "implementing"
         // when the first task is started via orchestrate_start_task.
         const goal = extractGoalFromMarkdown(implPlan);
         const newPlan = {
             goal,
-            status: "planning" as const,
+            status: "setup" as const,
             tasks: []
         };
         StateManager.savePlan(newPlan);

@@ -203,8 +203,8 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (!transitionTo("planning", plan)) {
-                throw new Error("Failed to transition to planning state");
+            if (!transitionTo("replanning", plan)) {
+                throw new Error("Failed to transition to replanning state");
             }
 
             return {

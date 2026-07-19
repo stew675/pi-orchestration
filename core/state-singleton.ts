@@ -27,6 +27,8 @@ export const OrchestratorState = {
     },
     get isExecuting(): boolean {
         return (
+            this.currentState === "setup" ||
+            this.currentState === "replanning" ||
             this.currentState === "implementing" ||
             this.currentState === "pausing" ||
             this.currentState === "paused" ||
@@ -602,7 +604,9 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
         planning: "PLANNING",
         reviewing: "REVIEWING",
         reviewed: "PLANNING",
+        setup: "SETUP",
         implementing: "IMPLEMENTING",
+        replanning: "REPLANNING",
         pausing: "PAUSED",
         paused: "PAUSED",
         resuming: "IMPLEMENTING",

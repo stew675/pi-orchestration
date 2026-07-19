@@ -8,7 +8,9 @@ import type { OrchestrationPlan } from "./types";
  * - planning: Building/editing plan
  * - reviewing: Plan under review (by reviewer model or user)
  * - reviewed: Plan approved, waiting for execution start
+ * - setup: Ready to create structured tasks after plan approval
  * - implementing: Actively running tasks
+ * - replanning: Modifying tasks to recover from a failure
  * - pausing: Graceful pause requested, letting current task(s) finish
  * - paused: User-initiated pause (graceful or stop)
  * - resuming: Resuming from pause/crash
@@ -22,7 +24,9 @@ export type OrchestrationState =
   | "planning"
   | "reviewing"
   | "reviewed"
+  | "setup"
   | "implementing"
+  | "replanning"
   | "pausing"
   | "paused"
   | "resuming"
@@ -36,15 +40,17 @@ export type OrchestrationState =
  * Key: current state, Value: array of allowed next states.
  */
 export const STATE_TRANSITIONS: Record<OrchestrationState, Array<OrchestrationState>> = {
-  inactive: ["planning", "implementing", "paused", "failed", "verifying", "completed", "code_review", "reviewing", "reviewed", "resuming"],
-  planning: ["reviewing", "implementing", "inactive"],
-  reviewing: ["planning", "implementing", "inactive"],
-  reviewed: ["implementing", "inactive"],
-  implementing: ["pausing", "paused", "failed", "verifying", "code_review", "planning", "inactive"],
+  inactive: ["planning", "implementing", "setup", "replanning", "paused", "failed", "verifying", "completed", "code_review", "reviewing", "reviewed", "resuming"],
+  planning: ["reviewing", "setup", "inactive"],
+  reviewing: ["planning", "setup", "inactive"],
+  reviewed: ["setup", "inactive"],
+  setup: ["implementing", "inactive"],
+  implementing: ["pausing", "paused", "failed", "verifying", "code_review", "replanning", "inactive"],
+  replanning: ["implementing", "inactive"],
   pausing: ["paused", "failed", "inactive"],
-  paused: ["implementing", "failed", "planning", "inactive"],
+  paused: ["implementing", "failed", "replanning", "inactive"],
   resuming: ["implementing", "failed", "inactive"],
-  failed: ["planning", "implementing", "inactive"],
+  failed: ["replanning", "implementing", "inactive"],
   verifying: ["completed", "inactive"],
   completed: ["planning", "inactive"],
   code_review: ["implementing", "verifying", "failed", "inactive"],
@@ -89,7 +95,9 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
     planning: "planning",
     reviewing: "planning",
     reviewed: "planning",
+    setup: "setup",
     implementing: "implementing",
+    replanning: "replanning",
     pausing: "pausing",
     paused: "paused",
     resuming: "implementing",
@@ -108,8 +116,12 @@ export function mapPlanStatusToState(status: OrchestrationPlan["status"]): Orche
   switch (status) {
     case "planning":
       return "planning";
+    case "setup":
+      return "setup";
     case "implementing":
       return "implementing";
+    case "replanning":
+      return "replanning";
     case "pausing":
       return "pausing";
     case "paused":

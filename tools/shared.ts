@@ -197,10 +197,17 @@ export function isBuildTask(description: string): boolean {
 // ---------------------------------------------------------------------------
 
 /** Combined prerequisite check for task CRUD tools: isActive + exec mode + plan not executing. */
+/** Combined prerequisite check for task CRUD tools: isActive + exec mode + setup/replanning gating. */
 export function requireTaskCrudPrereqs() {
     if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
     requireExecutionMode();
-    requirePlanNotExecuting();
+    
+    const state = OrchestratorState.currentState;
+    if (state !== "setup" && state !== "replanning") {
+        throw new Error(
+            `Blocked: task modification (add, edit, delete, complete) is only allowed during 'setup' or 'replanning' states. Current state is '${state}'.`
+        );
+    }
 }
 
 /** Send a silent guidance message to the orchestrator (model sees it, user doesn't). */
