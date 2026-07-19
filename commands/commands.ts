@@ -21,7 +21,7 @@ import { openSettingsMenu } from "../settings/settings-menu";
 import { AcceptOrEditDialog } from "../ui/accept-or-edit-dialog";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { transitionTo } from "../core/state-machine";
+import { transitionTo, mapPlanStatusToState } from "../core/state-machine";
 
 /**
  * Enter orchestration mode: capture current model, optionally switch to
@@ -58,7 +58,7 @@ async function exitOrchestration(pi: ExtensionAPI, ctx: ExtensionContext) {
 
     // Plan is intentionally NOT cleared - incomplete plans on disk
     // are preserved so they can be resumed later via /om-enable.
-    setOrchestrationMode(false, false, false, pi, refreshBorder);
+    setOrchestrationMode("inactive", pi, refreshBorder);
     requestSystemPromptRestore();
 
     // Restore the original main model if one was captured
@@ -240,7 +240,7 @@ function findNextTaskToRun(plan: OrchestrationPlan): Task | null {
  */
 async function enterPlanningWithCleanContext(pi: ExtensionAPI, ctx: ExtensionContext) {
     await enterOrchestrationMode(pi, ctx);
-    setOrchestrationMode(true, false, true, pi, refreshBorder);
+    setOrchestrationMode("planning", pi, refreshBorder);
     OrchestratorState.shouldResetContext = true;
     // Reset planning hint one-shot flags for a fresh session
     OrchestratorState._preWriteHintSent = false;
@@ -259,7 +259,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
     if (resume) {
         // Resume the existing plan
         await enterOrchestrationMode(pi, ctx);
-        setOrchestrationMode(true, true, false, pi, refreshBorder);
+        setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder);
         OrchestratorState.shouldResetContext = true;
         OrchestratorState._manualPause = false;
         OrchestratorState._pauseReason = null;
@@ -447,7 +447,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     // Clear planning hint flags — no longer in planning
     OrchestratorState._preWriteHintSent = false;
 
-    setOrchestrationMode(OrchestratorState.isActive, true, false, pi, refreshBorder);
+    setOrchestrationMode("implementing", pi, refreshBorder);
 
     // Inject the full implementation plan directly into the wake-up message so it
     // survives context pruning and avoids system-prompt per-message token limits.
@@ -584,13 +584,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             // --- Toggle OFF (exit planning mode) ---
             if (OrchestratorState.planningMode) {
                 await exitPlanningMode(pi, ctx);
-                setOrchestrationMode(
-                    OrchestratorState.isActive,
-                    OrchestratorState.isExecuting,
-                    false,
-                    pi,
-                    refreshBorder
-                );
+                setOrchestrationMode("inactive", pi, refreshBorder);
                 ctx.ui.notify("Planning mode exited. Implementation plan preserved on disk.", "info");
                 return;
             }
@@ -620,7 +614,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 }
             }
 
-            setOrchestrationMode(OrchestratorState.isActive, false, true, pi, refreshBorder);
+            setOrchestrationMode("planning", pi, refreshBorder);
             OrchestratorState.shouldResetContext = true;
             // Reset planning hint one-shot flags
             OrchestratorState._preWriteHintSent = false;
@@ -707,7 +701,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             }
 
             await exitPlanningMode(pi, ctx);
-            setOrchestrationMode(OrchestratorState.isActive, true, false, pi, refreshBorder);
+            setOrchestrationMode("implementing", pi, refreshBorder);
 
             ctx.ui.notify(
                 recovered > 0
@@ -758,7 +752,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 OrchestratorState._manualPause = false;
                 OrchestratorState._pauseReason = null;
                 OrchestratorState._inReviewPhase = false;
-                setOrchestrationMode(OrchestratorState.isActive, false, false, pi, refreshBorder);
+                setOrchestrationMode("planning", pi, refreshBorder);
                 ctx.ui.notify("Orchestration plan cleared. Describe a new goal to start planning.", "info");
             }
         }

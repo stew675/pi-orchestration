@@ -9,6 +9,7 @@ import type { OrchestrationPlan } from "./types";
  * - reviewing: Plan under review (by reviewer model or user)
  * - reviewed: Plan approved, waiting for execution start
  * - implementing: Actively running tasks
+ * - pausing: Graceful pause requested, letting current task(s) finish
  * - paused: User-initiated pause (graceful or stop)
  * - resuming: Resuming from pause/crash
  * - failed: Task failed, awaiting recovery
@@ -22,6 +23,7 @@ export type OrchestrationState =
   | "reviewing"
   | "reviewed"
   | "implementing"
+  | "pausing"
   | "paused"
   | "resuming"
   | "failed"
@@ -34,110 +36,48 @@ export type OrchestrationState =
  * Key: current state, Value: array of allowed next states.
  */
 export const STATE_TRANSITIONS: Record<OrchestrationState, Array<OrchestrationState>> = {
-  inactive: ["planning"],
-  planning: ["reviewing", "implementing"],
-  reviewing: ["planning", "implementing"],
-  reviewed: ["implementing"],
-  implementing: ["paused", "failed", "verifying", "code_review"],
-  paused: ["implementing", "failed"],
-  resuming: ["implementing", "failed"],
-  failed: ["planning", "implementing"],
-  verifying: ["completed"],
-  completed: ["planning"],
-  code_review: ["implementing", "verifying", "failed"],
+  inactive: ["planning", "implementing", "paused", "failed", "verifying", "completed", "code_review", "reviewing", "reviewed", "resuming"],
+  planning: ["reviewing", "implementing", "inactive"],
+  reviewing: ["planning", "implementing", "inactive"],
+  reviewed: ["implementing", "inactive"],
+  implementing: ["pausing", "paused", "failed", "verifying", "code_review", "planning", "inactive"],
+  pausing: ["paused", "failed", "inactive"],
+  paused: ["implementing", "failed", "planning", "inactive"],
+  resuming: ["implementing", "failed", "inactive"],
+  failed: ["planning", "implementing", "inactive"],
+  verifying: ["completed", "inactive"],
+  completed: ["planning", "inactive"],
+  code_review: ["implementing", "verifying", "failed", "inactive"],
 };
 
 /**
- * Current state derived from OrchestratorState + plan file.
- * This is the source of truth for the orchestrator's current state.
+ * Current state of the orchestrator.
+ * This is the single source of truth.
  */
-export function getCurrentOrchestrationState(plan: OrchestrationPlan | null): OrchestrationState {
-  if (!OrchestratorState.isActive) {
-    return "inactive";
-  }
-
-  // Planning mode takes precedence
-  if (OrchestratorState.planningMode) {
-    return "planning";
-  }
-
-  // Implementation mode
-  if (OrchestratorState.isExecuting) {
-    if (plan?.status === "paused" || OrchestratorState._pauseReason) {
-      return "paused";
-    }
-    if (plan?.status === "failed") {
-      return "failed";
-    }
-    if (plan?.status === "verifying") {
-      return "verifying";
-    }
-    if (plan?.status === "code_review") {
-      return "code_review";
-    }
-    return "implementing";
-  }
-
-  // Idle but active - should not normally happen
-  return "inactive";
+export function getCurrentOrchestrationState(_plan: OrchestrationPlan | null): OrchestrationState {
+  return OrchestratorState.currentState;
 }
 
 /**
  * State transition function with validation.
  * Returns true if transition was successful, false if invalid.
- * Updates both OrchestratorState flags and plan.status.
+ * Updates OrchestratorState.currentState and maps plan.status to match.
  */
 export function transitionTo(newState: OrchestrationState, plan: OrchestrationPlan): boolean {
-  const currentState = getCurrentOrchestrationState(plan);
+  const currentState = OrchestratorState.currentState;
 
   if (!STATE_TRANSITIONS[currentState].includes(newState)) {
     console.warn(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
     return false;
   }
 
-  // Update OrchestratorState flags to reflect new state
-  updateStateFlags(newState);
+  // Update OrchestratorState.currentState directly as the single source of truth
+  OrchestratorState.currentState = newState;
 
-  // Update plan status to match
+  // Update plan status to match as a projection of currentState
   plan.status = mapStateToPlanStatus(newState);
 
   return true;
-}
-
-/**
- * Update OrchestratorState boolean flags based on the target state.
- */
-function updateStateFlags(state: OrchestrationState): void {
-  // Reset all flags first
-  OrchestratorState.isExecuting = false;
-  OrchestratorState.planningMode = false;
-
-  switch (state) {
-    case "planning":
-      OrchestratorState.planningMode = true;
-      break;
-
-    case "implementing":
-    case "verifying":
-    case "code_review":
-      OrchestratorState.isExecuting = true;
-      break;
-
-    case "paused":
-    case "failed":
-    case "completed":
-    case "inactive":
-      OrchestratorState.isExecuting = false;
-      OrchestratorState.planningMode = false;
-      break;
-
-    case "reviewing":
-    case "reviewed":
-    case "resuming":
-      // These states can have isExecuting depending on context
-      // Let the caller set appropriate flags if needed
-      break;
-  }
 }
 
 /**
@@ -150,6 +90,7 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
     reviewing: "planning",
     reviewed: "planning",
     implementing: "implementing",
+    pausing: "pausing",
     paused: "paused",
     resuming: "implementing",
     failed: "failed",
@@ -158,6 +99,32 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
     code_review: "code_review",
   };
   return mapping[state];
+}
+
+/**
+ * Map plan status to orchestration state.
+ */
+export function mapPlanStatusToState(status: OrchestrationPlan["status"]): OrchestrationState {
+  switch (status) {
+    case "planning":
+      return "planning";
+    case "implementing":
+      return "implementing";
+    case "pausing":
+      return "pausing";
+    case "paused":
+      return "paused";
+    case "verifying":
+      return "verifying";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "code_review":
+      return "code_review";
+    default:
+      return "planning";
+  }
 }
 
 /**

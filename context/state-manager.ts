@@ -16,6 +16,7 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
         reviewing: "planning",
         reviewed: "planning",
         implementing: "implementing",
+        pausing: "pausing",
         paused: "paused",
         resuming: "implementing",
         failed: "failed",
@@ -435,14 +436,16 @@ export class StateManager {
         if (primary) {
             // Ensure plan status is consistent with current orchestration state
             const currentState = getCurrentOrchestrationState(primary);
-            const expectedStatus = mapStateToPlanStatus(currentState);
-            if (primary.status !== expectedStatus) {
-                console.warn(`[state-manager] Plan status mismatch: '${primary.status}' vs expected '${expectedStatus}'. Correcting.`);
-                primary.status = expectedStatus;
-                try {
-                    safeWriteFile(getPlanJsonPath(), JSON.stringify(primary, null, 2));
-                } catch (e) {
-                    console.error(`Failed to persist corrected plan status:`, e);
+            if (currentState !== "inactive") {
+                const expectedStatus = mapStateToPlanStatus(currentState);
+                if (primary.status !== expectedStatus) {
+                    console.warn(`[state-manager] Plan status mismatch: '${primary.status}' vs expected '${expectedStatus}'. Correcting.`);
+                    primary.status = expectedStatus;
+                    try {
+                        safeWriteFile(getPlanJsonPath(), JSON.stringify(primary, null, 2));
+                    } catch (e) {
+                        console.error(`Failed to persist corrected plan status:`, e);
+                    }
                 }
             }
             cachedPlan = primary;

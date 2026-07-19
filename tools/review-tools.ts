@@ -60,7 +60,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             Runner.cancelAllSummaries();
 
             // Transition out of execution mode so the TUI border reflects completion.
-            setOrchestrationMode(true, false, false, getPi(), refreshBorder);
+            setOrchestrationMode("completed", getPi(), refreshBorder);
 
             return {
                 content: [

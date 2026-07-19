@@ -138,6 +138,7 @@ const STATE_COLORS: Record<OrchestrationState, SemanticColor> = {
     reviewing: "borderAccent",
     reviewed: "mdHeading",
     implementing: "success",
+    pausing: "warning",
     paused: "warning",
     resuming: "success",
     failed: "error",

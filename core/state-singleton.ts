@@ -21,11 +21,30 @@ import { getCurrentOrchestrationState, type OrchestrationState } from "./state-m
  * Direct property reads are acceptable for guards (e.g., `if (!OrchestratorState.isActive)`).
  */
 export const OrchestratorState = {
-    isActive: false,
+    currentState: "inactive" as OrchestrationState,
+    get isActive(): boolean {
+        return this.currentState !== "inactive";
+    },
+    get isExecuting(): boolean {
+        return (
+            this.currentState === "implementing" ||
+            this.currentState === "pausing" ||
+            this.currentState === "paused" ||
+            this.currentState === "resuming" ||
+            this.currentState === "failed" ||
+            this.currentState === "verifying" ||
+            this.currentState === "code_review"
+        );
+    },
+    get planningMode(): boolean {
+        return (
+            this.currentState === "planning" ||
+            this.currentState === "reviewing" ||
+            this.currentState === "reviewed"
+        );
+    },
     pi: undefined as ExtensionAPI | undefined,
     theme: null as Theme | null,
-    isExecuting: false,
-    planningMode: false,
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
     summaryModel: null as ModelRef | null,
@@ -91,36 +110,31 @@ OrchestratorState.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
 
 /**
  * Transition the orchestrator into a specific mode.
- * Sets all three boolean flags atomically, updates active tools,
+ * Sets the current state, updates active tools,
  * and calls an optional callback (e.g. TUI border refresh).
  *
- * @param isActive  - Is orchestration mode enabled at all?
- * @param isExecuting - Is the main execution loop running?
- * @param planningMode - Is the user actively building/editing a plan?
+ * @param state     - The target OrchestrationState
  * @param pi        - ExtensionAPI (for tool updates)
  * @param onMode    - Optional callback invoked with the resolved mode string
  */
 export function setOrchestrationMode(
-    isActive: boolean,
-    isExecuting: boolean,
-    planningMode: boolean,
+    state: OrchestrationState,
     pi: ExtensionAPI,
     onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void
 ) {
-    OrchestratorState.isActive = isActive;
-    OrchestratorState.isExecuting = isExecuting;
-    OrchestratorState.planningMode = planningMode;
+    OrchestratorState.currentState = state;
 
     updateActiveTools(pi);
 
     // Derive canonical mode label for callbacks (TUI border, etc.)
-    const mode: "inactive" | "planning" | "executing" | "idle" = !isActive
-        ? "inactive"
-        : planningMode
-          ? "planning"
-          : isExecuting
-            ? "executing"
-            : "idle";
+    const mode: "inactive" | "planning" | "executing" | "idle" =
+        state === "inactive"
+            ? "inactive"
+            : OrchestratorState.planningMode
+              ? "planning"
+              : OrchestratorState.isExecuting
+                ? "executing"
+                : "idle";
 
     onMode?.(mode);
 }
@@ -152,9 +166,7 @@ export function requireActive(ctx: {
 
 /** Default values for all OrchestratorState properties. */
 const STATE_DEFAULTS = {
-    isActive: false,
-    isExecuting: false,
-    planningMode: false,
+    currentState: "inactive" as OrchestrationState,
     theme: null as Theme | null,
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
@@ -591,6 +603,7 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
         reviewing: "REVIEWING",
         reviewed: "PLANNING",
         implementing: "IMPLEMENTING",
+        pausing: "PAUSED",
         paused: "PAUSED",
         resuming: "IMPLEMENTING",
         failed: "FAILED",
