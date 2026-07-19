@@ -81,11 +81,11 @@ async function exitOrchestration(pi: ExtensionAPI, ctx: ExtensionContext) {
 
 // --- Strategy-map leaf handlers for resumePlanExecution ---
 
-/** Send a structured orchestrator wake-up message as a follow-up turn. */
+/** Send a structured orchestrator wake-up message. */
 function sendResumeMessage(pi: ExtensionAPI, content: string) {
     pi.sendMessage(
         { customType: "orchestrator_event", content, display: false },
-        { deliverAs: "followUp", triggerTurn: true }
+        { triggerTurn: true }
     );
 }
 
@@ -105,8 +105,10 @@ function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
     );
 
     // Set status back so the runner can pick up the code-review flow via finishPlan
-    if (!transitionTo("implementing", plan)) {
-        notifyTuiOnly(pi, "Failed to transition to implementing state on code review resume");
+    if (OrchestratorState.currentState !== "implementing") {
+        if (!transitionTo("implementing", plan)) {
+            notifyTuiOnly(pi, "Failed to transition to implementing state on code review resume");
+        }
     }
     StateManager.savePlan(plan);
     Runner.runTasks(pi).catch((err: Error) => {
@@ -127,15 +129,22 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
     const next = findNextTaskToRun(plan);
     if (!next) {
         if (OrchestratorState.codeReviewModel) {
-            if (!transitionTo("implementing", plan)) {
-                notifyTuiOnly(pi, "Failed to transition to implementing state on resume (code review model)");
+            if (OrchestratorState.currentState !== "implementing") {
+                if (!transitionTo("implementing", plan)) {
+                    notifyTuiOnly(pi, "Failed to transition to implementing state on resume (code review model)");
+                }
             }
             StateManager.savePlan(plan);
             Runner.runTasks(pi);
             return;
         }
-        if (!transitionTo("verifying", plan)) {
-            notifyTuiOnly(pi, "Failed to transition to verifying state on resume");
+        if (OrchestratorState.currentState === "paused") {
+            transitionTo("implementing", plan);
+        }
+        if (OrchestratorState.currentState === "implementing") {
+            if (!transitionTo("verifying", plan)) {
+                notifyTuiOnly(pi, "Failed to transition to verifying state on resume");
+            }
         }
         StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
@@ -154,8 +163,10 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
         return;
     }
 
-    if (!transitionTo("implementing", plan)) {
-        notifyTuiOnly(pi, "Failed to transition to implementing state on resume (task found)");
+    if (OrchestratorState.currentState !== "implementing") {
+        if (!transitionTo("implementing", plan)) {
+            notifyTuiOnly(pi, "Failed to transition to implementing state on resume (task found)");
+        }
     }
     plan.currentTaskId = next.id;
     StateManager.savePlan(plan);
@@ -173,9 +184,6 @@ function handleResumePlanning(_plan: OrchestrationPlan, pi: ExtensionAPI) {
 }
 
 function handleResumeFailed(plan: OrchestrationPlan, pi: ExtensionAPI) {
-    if (!transitionTo("paused", plan)) {
-        notifyTuiOnly(pi, "Failed to transition to paused state on resume from failed");
-    }
     StateManager.savePlan(plan);
     sendResumeMessage(
         pi,
@@ -200,8 +208,11 @@ function resumePlanExecution(_stalePlan: unknown, pi: ExtensionAPI) {
     killAllProcesses("SIGKILL");
 
     const handlers: Record<string, (p: OrchestrationPlan, pi: ExtensionAPI) => void> = {
+        verifying: handleResumeReview,
         reviewing: handleResumeReview,
+        code_review: handleResumeCodeReview,
         reviewing_code: handleResumeCodeReview,
+        implementing: handleResumeExecutingOrPaused,
         executing: handleResumeExecutingOrPaused,
         paused: handleResumeExecutingOrPaused,
         planning: handleResumePlanning,
@@ -447,8 +458,6 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     // Clear planning hint flags — no longer in planning
     OrchestratorState._preWriteHintSent = false;
 
-    setOrchestrationMode("setup", pi, refreshBorder);
-
     // Inject the full implementation plan directly into the wake-up message so it
     // survives context pruning and avoids system-prompt per-message token limits.
     const planPayload =
@@ -460,6 +469,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             notifyTuiOnly(pi, "Failed to transition to setup state in startExecutionFromPlan");
         }
         StateManager.savePlan(plan);
+        setOrchestrationMode("setup", pi, refreshBorder);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
         ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
         pi.sendMessage(
@@ -471,6 +481,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             { triggerTurn: true }
         );
     } else {
+        setOrchestrationMode("setup", pi, refreshBorder);
         // Pre-initialize the plan with status "setup" so the orchestrator
         // can call orchestrate_add_task. Status transitions to "implementing"
         // when the first task is started via orchestrate_start_task.
@@ -705,7 +716,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             }
 
             await exitPlanningMode(pi, ctx);
-            setOrchestrationMode("implementing", pi, refreshBorder);
+            setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder);
 
             ctx.ui.notify(
                 recovered > 0
