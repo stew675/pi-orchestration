@@ -129,13 +129,13 @@ export function mapPlanStatusToState(status: OrchestrationPlan["status"]): Orche
     case "setup":
       return "setup";
     case "implementing":
-      return "implementing";
+      return "resuming";
     case "replanning":
       return "replanning";
     case "pausing":
-      return "pausing";
+      return "resuming";
     case "paused":
-      return "paused";
+      return "resuming";
     case "verifying":
       return "verifying";
     case "completed":

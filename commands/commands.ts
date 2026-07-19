@@ -163,11 +163,6 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
         return;
     }
 
-    if (OrchestratorState.currentState !== "implementing") {
-        if (!transitionTo("implementing", plan)) {
-            notifyTuiOnly(pi, "Failed to transition to implementing state on resume (task found)");
-        }
-    }
     plan.currentTaskId = next.id;
     StateManager.savePlan(plan);
     sendResumeMessage(
