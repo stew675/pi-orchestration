@@ -56,7 +56,7 @@ function recolorBorderChars(line: string, borderColor: (s: string) => string): s
     return out;
 }
 
-type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim" | "muted";
+type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim" | "muted" | "mdHeading" | "border" | "borderAccent";
 
 /** Resolve the semantic color for orchestration phase display. Uses computeExecutionPhaseLabel from core.ts to avoid duplicating status evaluation logic. */
 function getOrchestrationPhaseColor(): ((s: string) => string) | null {
@@ -131,12 +131,12 @@ interface PlanDisplayOptions {
 
 /** Lookup table mapping execution phase labels to semantic colors. */
 const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
-    PLANNING: "warning",
+    PLANNING: "mdHeading",
     SETUP: "warning",
     IMPLEMENTING: "success",
     REPLANNING: "warning",
-    VERIFYING: "accent",
-    REVIEWING: "accent",
+    VERIFYING: "border",
+    REVIEWING: "borderAccent",
     PAUSED: "warning",
     STOPPED: "error",
     COMPLETED: "accent",
