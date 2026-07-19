@@ -130,8 +130,10 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             // Set current task and start implementing
-            if (!transitionTo("implementing", plan)) {
-                throw new Error("Failed to transition to implementing state");
+            if (getCurrentOrchestrationState(plan) !== "implementing") {
+                if (!transitionTo("implementing", plan)) {
+                    throw new Error("Failed to transition to implementing state");
+                }
             }
             plan.currentTaskId = task.id;
             StateManager.savePlan(plan);
