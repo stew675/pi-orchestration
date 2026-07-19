@@ -57,7 +57,7 @@ export const OrchestratorState = {
     _preWriteHintSent: false,
     /** One-shot flag: true while the reviewer model is active during plan review cycle. */
     _inReviewPhase: false,
-    /** Flag indicating that the planner is currently incorporating feedback from a recent review. 
+    /** Flag indicating that the planner is currently incorporating feedback from a recent review.
      *  While true, updates to the plan will not trigger a new automatic review cycle. */
     _incorporatingFeedback: false,
     /** One-shot flag: reviewer is scheduled to start on agent_settled. */

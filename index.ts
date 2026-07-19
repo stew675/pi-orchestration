@@ -43,9 +43,13 @@ import {
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
 
-import { ORCHESTRATOR_PLANNING_SYSTEM_PROMPT, ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT,
-    PLANNING_HINT_PRE_WRITE, ORCHESTRATOR_REVIEW_SYSTEM_PROMPT,
-    ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT } from "./context/prompts";
+import {
+    ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
+    ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT,
+    PLANNING_HINT_PRE_WRITE,
+    ORCHESTRATOR_REVIEW_SYSTEM_PROMPT,
+    ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT
+} from "./context/prompts";
 
 /** Watchdog timer interval (ms) — checks for stalled orchestrator every 2 seconds during execution. */
 const WATCHDOG_INTERVAL_MS = 2000;
@@ -267,7 +271,8 @@ export default function (pi: ExtensionAPI) {
                     await pi.sendMessage(
                         {
                             customType: "orchestrator_event",
-                            content: "System: You are now acting as the Plan Reviewer. Please review the implementation plan at .pi/orchestration/plans/implementation-plan.md and provide your assessment using orchestrate_review_plan. Be thorough in identifying missing steps, incorrect assumptions, or suboptimal approaches.",
+                            content:
+                                "System: You are now acting as the Plan Reviewer. Please review the implementation plan at .pi/orchestration/plans/implementation-plan.md and provide your assessment using orchestrate_review_plan. Be thorough in identifying missing steps, incorrect assumptions, or suboptimal approaches.",
                             display: false
                         },
                         { triggerTurn: true }
