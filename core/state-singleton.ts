@@ -51,6 +51,8 @@ export const OrchestratorState = {
     shouldResetContext: false,
     /** One-shot flag: plan was just written/edited by the agent - show Accept/Edit dialog on next turn_end. */
     _planJustUpdated: false,
+    /** Tracks whether the plan was edited since the last presentation or user feedback. */
+    _planEditedThisTurn: false,
     /** One-shot flag: pre-write quality hint sent. Fires once on first orchestrate_write_plan call. */
     _preWriteHintSent: false,
     /** One-shot flag: true while the reviewer model is active during plan review cycle. */
@@ -170,6 +172,7 @@ const STATE_DEFAULTS = {
     pendingSystemPromptRestore: false,
     shouldResetContext: false,
     _planJustUpdated: false,
+    _planEditedThisTurn: false,
     _preWriteHintSent: false,
     _inReviewPhase: false,
     _incorporatingFeedback: false,

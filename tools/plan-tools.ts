@@ -5,8 +5,8 @@ import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
 import { renderPlanResult, renderWritePlanCall, renderWritePlanResult } from "./shared";
 
 /** Build a standard tool response with terminate flag. */
-function toolResponse(text: string) {
-    return { content: [{ type: "text", text }] as any, terminate: true, details: {} };
+function toolResponse(text: string, terminate: boolean = true) {
+    return { content: [{ type: "text", text }] as any, terminate, details: {} };
 }
 
 /** Register the implementation-plan tools (planning phase). */
@@ -32,6 +32,15 @@ export function registerPlanTools(pi: ExtensionAPI) {
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
             StateManager.saveImplementationPlan(params.content);
+            OrchestratorState._planEditedThisTurn = true;
+
+            // Trigger review cycle or Accept/Edit dialog immediately after write
+            if (OrchestratorState.reviewerModel && !OrchestratorState._incorporatingFeedback) {
+                OrchestratorState._pendingReviewStart = true;
+            } else {
+                OrchestratorState._planJustUpdated = true;
+            }
+
             return toolResponse("Implementation plan saved.");
         }
     });
@@ -41,8 +50,9 @@ export function registerPlanTools(pi: ExtensionAPI) {
         label: "Edit Plan File",
         description:
             "Surgically edit the implementation plan file. Provide the exact text to replace and its replacement. No path needed.\n" +
+            "You may chain multiple calls to update different sections in a single turn — do not summarize after each edit.\n" +
             "When editing, search and update ALL relevant sections to enact every requested change — don't just patch one spot.",
-        promptSnippet: "Edit a section of the implementation plan",
+        promptSnippet: "Edit a section of the implementation plan (can be called multiple times)",
         promptGuidelines: [
             "Use orchestrate_edit_plan for surgical updates to an existing plan.",
             "The oldText must match exactly (including whitespace). Use orchestrate_get_plan first if unsure."
@@ -57,7 +67,8 @@ export function registerPlanTools(pi: ExtensionAPI) {
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
             const result = StateManager.editImplementationPlan(params.oldText, params.newText);
-            return toolResponse(result);
+            OrchestratorState._planEditedThisTurn = true;
+            return toolResponse(result, false);
         }
     });
 
@@ -65,13 +76,14 @@ export function registerPlanTools(pi: ExtensionAPI) {
         name: "orchestrate_present_plan",
         label: "Present Plan for Review",
         description:
-            "Load the existing implementation plan from disk and present it to the user for review. " +
-            "Use this when asked to display an existing plan - do NOT summarize or rewrite it.",
-        promptSnippet: "Display the existing implementation plan and trigger the Accept/Edit dialog",
+            "Load the existing implementation plan from disk and present it to the user for review.\n" +
+            "Call this when the plan is finalized after writing/editing — it triggers the Accept/Edit dialog or review cycle.\n" +
+            "After calling this, STOP IMMEDIATELY.",
+        promptSnippet: "Present the finalised plan to the user and trigger the Accept/Edit dialog",
         promptGuidelines: [
-            "Call orchestrate_present_plan when instructed by the system to show an existing plan. " +
+            "Call orchestrate_present_plan when you have finished all edits and the plan is ready for user approval. " +
                 "After calling this, STOP immediately - do not generate any further content.",
-            "Do NOT call this during normal planning; only use it when explicitly requested."
+            "Do NOT call this during initial planning; use orchestrate_write_plan first to create the plan draft."
         ],
         parameters: Type.Object({}),
         renderShell: "self",
@@ -85,9 +97,14 @@ export function registerPlanTools(pi: ExtensionAPI) {
                 return toolResponse("No implementation plan found on disk.");
             }
 
-            // Flag that the plan was just presented - triggers Accept/Edit dialog on turn_end.
-            OrchestratorState._planJustUpdated = true;
+            // Flag that the plan was just presented - triggers Accept/Edit or review cycle on agent_settled.
+            if (OrchestratorState.reviewerModel && !OrchestratorState._incorporatingFeedback && OrchestratorState._planEditedThisTurn) {
+                OrchestratorState._pendingReviewStart = true;
+            } else {
+                OrchestratorState._planJustUpdated = true;
+            }
             OrchestratorState._incorporatingFeedback = false; // Finished incorporating review feedback.
+            OrchestratorState._planEditedThisTurn = false; // Reset plan edited flag.
 
             return toolResponse(`--- Implementation Plan ---\n\n${planContent}`);
         }

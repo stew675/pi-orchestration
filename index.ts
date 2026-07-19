@@ -219,43 +219,24 @@ export default function (pi: ExtensionAPI) {
         }
     });
 
-    /** Intercept planning tool results and replace them with the full plan from disk.
-     *  Also injects contextual hints at key moments for guidance-in-the-moment pattern. */
+    /** Intercept planning tool results for guidance-in-the-moment pattern.
+     *  Only orchestrate_write_plan injects a quality hint (one-shot).
+     *  Dialog / review triggering is handled by orchestrate_present_plan, not write/edit. */
     pi.on("tool_result", async (event, _ctx) => {
         if (!OrchestratorState.isActive || !OrchestratorState.planningMode || event.isError) return;
 
-        if (event.toolName === "orchestrate_write_plan" || event.toolName === "orchestrate_edit_plan") {
-            const planContent = StateManager.loadImplementationPlan();
-
-            // If a reviewer model is configured AND we aren't currently incorporating review feedback,
-            // queue the review cycle instead of showing the Accept/Edit dialog immediately.
-            if (OrchestratorState.reviewerModel && !OrchestratorState._incorporatingFeedback) {
-                OrchestratorState._pendingReviewStart = true;
-            } else {
-                // Flag that the plan was just updated - show Accept/Edit dialog on agent_settled.
-                OrchestratorState._planJustUpdated = true;
+        if (event.toolName === "orchestrate_write_plan") {
+            // Inject pre-write quality hint on first call (one-shot).
+            if (!OrchestratorState._preWriteHintSent) {
+                OrchestratorState._preWriteHintSent = true;
+                pi.sendMessage(
+                    { customType: "orchestrator_event", content: PLANNING_HINT_PRE_WRITE, display: false },
+                    { deliverAs: "nextTurn" }
+                );
             }
-
-            if (event.toolName === "orchestrate_write_plan") {
-                // Inject pre-write quality hint on first call (one-shot).
-                if (!OrchestratorState._preWriteHintSent) {
-                    OrchestratorState._preWriteHintSent = true;
-                    pi.sendMessage(
-                        { customType: "orchestrator_event", content: PLANNING_HINT_PRE_WRITE, display: false },
-                        { deliverAs: "nextTurn" }
-                    );
-                }
-                // Plan is already visible on screen from renderCall streaming + final render.
-                // Don't replace content - just let the existing display stay as-is.
-                return;
-            }
-
-            // orchestrate_edit_plan: show the full plan after each surgical edit.
-            if (planContent) {
-                return {
-                    content: [{ type: "text", text: `--- Implementation Plan ---\n\n${planContent}` }]
-                };
-            }
+            // Plan is already visible on screen from renderCall streaming + final render.
+            // Don't replace content - just let the existing display stay as-is.
+            return;
         } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
             // Reviewer finished — queue back to planning model and instruct planner to process review.
             OrchestratorState._pendingReviewCompletion = true;
