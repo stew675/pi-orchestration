@@ -24,15 +24,16 @@ export function setupOrchestratorStatusRenderer(pi: ExtensionAPI): void {
     pi.registerEntryRenderer<OrchestratorStatusEntry>("orchestration-status", (entry, _opts, theme) => {
         const data = entry.data ?? { title: "Unknown", message: "", timestamp: Date.now() };
 
-        // Compact single-line display for the status card.
-        const box = new Box(1, 1);
+        // Compact single-line display for the status card with minimal vertical spacing.
+        // Use paddingX=1 for horizontal padding but paddingY=0 to avoid extra blank lines.
+        const box = new Box(1, 0);
         const prefix = theme.fg("accent", "[orchestration]");
         const label = theme.fg("text", ` ${data.title}`);
         box.addChild(new Text(prefix + label, 0, 0));
 
         // Full message on second line (always shown for status entries).
         if (data.message) {
-            const msgLine = new Text(theme.fg("dim", data.message), 0, 1);
+            const msgLine = new Text(theme.fg("dim", data.message), 0, 0);
             box.addChild(msgLine);
         }
 
