@@ -42,6 +42,7 @@ import {
     resetLoopBreakerFlag,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
+import { transitionTo } from "./core/state-machine";
 
 import {
     ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
@@ -244,6 +245,15 @@ export default function (pi: ExtensionAPI) {
         } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
             // Reviewer finished — queue back to planning model and instruct planner to process review.
             OrchestratorState._pendingReviewCompletion = true;
+        } else if (event.toolName === "orchestrate_approve_goal" && OrchestratorState.isExecuting) {
+            // Final approval - transition to completed state
+            const plan = StateManager.loadPlan();
+            if (plan) {
+                if (!transitionTo("completed", plan)) {
+                    console.warn("Failed to transition to completed state after approve_goal");
+                }
+                StateManager.savePlan(plan);
+            }
         }
     });
 

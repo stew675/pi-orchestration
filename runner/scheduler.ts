@@ -5,6 +5,7 @@ import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
 import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
+import { getCurrentOrchestrationState, transitionTo } from "../core/state-machine";
 
 // ---------------------------------------------------------------------------
 // Scheduling lock - ensures only one scheduling decision runs at a time.
@@ -49,13 +50,16 @@ export async function runTasks(
                 return;
             }
 
+            // Get current state from state machine
+            const currentState = getCurrentOrchestrationState(plan);
+
             // Hard stop for paused/failed plans
-            if (plan.status === "paused" || plan.status === "failed") {
+            if (currentState === "paused" || currentState === "failed") {
                 return;
             }
 
             // Block scheduling while orchestrator is replanning
-            if (plan.status === "planning") {
+            if (currentState === "planning") {
                 return;
             }
 
@@ -94,7 +98,10 @@ export async function runTasks(
 
                 const failedTasks = (plan.tasks || []).filter((t) => t.status === "failed");
                 if (failedTasks.length > 0) {
-                    plan.status = "paused";
+                    // Transition to paused state
+                    if (!transitionTo("paused", plan)) {
+                        console.warn("Failed to transition to paused state due to failed tasks");
+                    }
                     savePlanSafely(plan);
                     // Include failed task's feedback so orchestrator has context for recovery
                     const failedDetails = failedTasks
@@ -115,7 +122,10 @@ export async function runTasks(
 
                 const allCompleted = (plan.tasks || []).every((t) => t.status === "completed");
                 if (!allCompleted) {
-                    plan.status = "paused";
+                    // Transition to paused state
+                    if (!transitionTo("paused", plan)) {
+                        console.warn("Failed to transition to paused state due to stalled execution");
+                    }
                     savePlanSafely(plan);
                     notifyOrchestrator(
                         pi,

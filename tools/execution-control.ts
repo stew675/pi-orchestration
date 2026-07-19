@@ -9,6 +9,7 @@ import type { Task } from "../core/types";
 import { ACTIVE_TASK_STATUSES } from "../core/types";
 import { signalTaskStarted } from "../process/loop-detector";
 import { requireExecutionMode, isBuildTask, sendSilentGuidance } from "./shared";
+import { transitionTo, getCurrentOrchestrationState } from "../core/state-machine";
 
 /** Register execution-control tools (ready_tasks, start_task, check_status, replan, resume_task, stop). */
 export function registerExecutionControlTools(pi: ExtensionAPI) {
@@ -129,7 +130,9 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             // Set current task and start implementing
-            plan.status = "implementing";
+            if (!transitionTo("implementing", plan)) {
+                throw new Error("Failed to transition to implementing state");
+            }
             plan.currentTaskId = task.id;
             StateManager.savePlan(plan);
 
@@ -200,8 +203,9 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            plan.status = "planning";
-            StateManager.savePlan(plan);
+            if (!transitionTo("planning", plan)) {
+                throw new Error("Failed to transition to planning state");
+            }
 
             return {
                 content: [
@@ -253,7 +257,15 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
             task.clarificationQuery = undefined;
 
-            StateManager.savePlan(plan);
+            // Ensure we're still in implementing state after resume
+            const refreshedPlan = StateManager.loadPlan();
+            if (refreshedPlan) {
+                const currentState = getCurrentOrchestrationState(refreshedPlan);
+                if (currentState !== "implementing" && currentState !== "paused") {
+                    transitionTo("implementing", refreshedPlan);
+                }
+                StateManager.savePlan(refreshedPlan);
+            }
 
             // Re-run tasks, passing the clarification data
             Runner.runTasks(getPi(), undefined, {
@@ -310,7 +322,9 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             const plan = StateManager.loadPlan();
             if (plan) {
-                plan.status = "paused";
+                if (!transitionTo("paused", plan)) {
+                    console.warn("Failed to transition to paused state on stop");
+                }
                 StateManager.savePlan(plan);
             }
 

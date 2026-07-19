@@ -1,5 +1,6 @@
 import { StateManager } from "../context/state-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
+import { getCurrentOrchestrationState } from "../core/state-machine";
 import {
     detectCycle,
     detectFileConflicts,
@@ -163,13 +164,17 @@ export function requireExecutionMode() {
 export function requirePlanNotExecuting() {
     const plan = StateManager.loadPlan();
     if (!plan) throw new Error("No plan exists.");
+    
+    // Get current state from state machine
+    const currentState = getCurrentOrchestrationState(plan);
+    
     // Block task modification during active execution - orchestrator must call
-    // orchestrate_replan first to shift into recovery mode (status: "planning").
-    // Allowed in: "planning" (recovery), "paused", "verifying" (final verification), "code_review".
-    const allowedStatuses = new Set(["planning", "paused", "verifying", "code_review"]);
-    if (!allowedStatuses.has(plan.status)) {
+    // orchestrate_replan first to shift into recovery mode (planning state).
+    // Allowed in: planning, paused, verifying, code_review, reviewing, reviewed.
+    const allowedStates: OrchestrationState[] = ["planning", "paused", "verifying", "code_review", "reviewing", "reviewed"];
+    if (!allowedStates.includes(currentState)) {
         throw new Error(
-            `Blocked during active execution (${plan.status}). Call orchestrate_replan first to enter recovery mode.`
+            `Blocked during active execution (${currentState}). Call orchestrate_replan first to enter recovery mode.`
         );
     }
 }

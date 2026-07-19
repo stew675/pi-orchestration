@@ -4,8 +4,27 @@ import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { OrchestrationPlan, TaskType, ALL_TASK_STATUSES } from "../core/types";
+import { getCurrentOrchestrationState, type OrchestrationState } from "../core/state-machine";
 
 const ORCHESTRATION_BASE = path.join(process.cwd(), CONFIG_DIR_NAME, "orchestration");
+
+/** Map orchestration state to plan.json status field. */
+function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["status"] {
+    const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
+        inactive: "planning",
+        planning: "planning",
+        reviewing: "planning",
+        reviewed: "planning",
+        implementing: "implementing",
+        paused: "paused",
+        resuming: "implementing",
+        failed: "failed",
+        completed: "completed",
+        verifying: "verifying",
+        code_review: "code_review",
+    };
+    return mapping[state];
+}
 
 /** Build a path under `.pi/orchestration/`. Optional `subDir` and `fileName` are appended. */
 function getOrchestrationPath(subDir?: string, fileName?: string): string {
@@ -414,6 +433,18 @@ export class StateManager {
 
         const primary = tryLoad(planPath);
         if (primary) {
+            // Ensure plan status is consistent with current orchestration state
+            const currentState = getCurrentOrchestrationState(primary);
+            const expectedStatus = mapStateToPlanStatus(currentState);
+            if (primary.status !== expectedStatus) {
+                console.warn(`[state-manager] Plan status mismatch: '${primary.status}' vs expected '${expectedStatus}'. Correcting.`);
+                primary.status = expectedStatus;
+                try {
+                    safeWriteFile(getPlanJsonPath(), JSON.stringify(primary, null, 2));
+                } catch (e) {
+                    console.error(`Failed to persist corrected plan status:`, e);
+                }
+            }
             cachedPlan = primary;
             return primary;
         }

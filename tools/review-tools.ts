@@ -6,6 +6,7 @@ import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG } from "
 import { refreshBorder } from "../ui/ui";
 import { resetLoopState } from "../process/loop-detector";
 import { buildFinalReviewMessage, notifyOrchestrator } from "../runner/utils";
+import { transitionTo } from "../core/state-machine";
 
 /** Plan status that permits goal approval (verification phase). */
 const REVIEW_STATUS = "verifying";
@@ -48,7 +49,10 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 );
             }
 
-            plan.status = "completed";
+            // Transition to completed state via state machine
+            if (!transitionTo("completed", plan)) {
+                throw new Error("Failed to transition to completed state");
+            }
             StateManager.savePlan(plan);
 
             // Clear all internal orchestrator state so a new goal starts fresh.
@@ -94,7 +98,9 @@ export function registerReviewTools(pi: ExtensionAPI) {
             }
 
             // Transition to the VERIFYING phase
-            plan.status = "verifying";
+            if (!transitionTo("verifying", plan)) {
+                throw new Error("Failed to transition to verifying state after code review");
+            }
             StateManager.savePlan(plan);
 
             // Wake up the orchestrator model and enter final review

@@ -15,6 +15,7 @@ import { validateTask } from "./validator";
 import { completeTaskWithSummary } from "./summarizer";
 import { processTaskResult as postProcessTaskResult } from "./post-processor";
 import { formatTimeout } from "../settings/time-utils";
+import { transitionTo, getCurrentOrchestrationState } from "../core/state-machine";
 
 /**
  * Execute a single task. Returns true to continue the loop, false to stop.
@@ -42,8 +43,10 @@ export async function executeTask(
         const currentPlan = StateManager.loadPlan();
         if (!currentPlan) return false;
 
+        const currentState = getCurrentOrchestrationState(currentPlan);
+
         // Hard stop
-        if (currentPlan.status === "paused" || currentPlan.status === "failed") {
+        if (currentState === "paused" || currentState === "failed") {
             return false;
         }
 
@@ -53,6 +56,11 @@ export async function executeTask(
         planTask.status = "running";
         planTask.startedAt = Date.now();
         currentPlan.currentTaskId = task.id;
+
+        // Ensure we're in implementing state
+        if (!transitionTo("implementing", currentPlan)) {
+            console.warn("Failed to transition to implementing state when starting task");
+        }
         savePlanSafely(currentPlan);
 
         // Inform user via UI
@@ -272,6 +280,9 @@ async function runTaskSubAgent(
         const allRelevantFiles = new Set([...(t.files || []), ...procResult.discoveredArtifacts]);
         t.result = { summary: t.result?.summary || "", artifacts: Array.from(allRelevantFiles) };
 
+        // Save plan before further processing
+        savePlanSafely(p);
+
         // Handle spawn error first
         if (procResult.spawnError) {
             t.status = "failed";
@@ -306,6 +317,11 @@ async function runTaskSubAgent(
             } else {
                 t.validatorFeedback = `Sub-agent timed out after ${task.timeoutMs ?? OrchestratorState.taskTimeoutMs}ms (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
             }
+
+            // Transition to failed state
+            if (!transitionTo("failed", p)) {
+                console.warn("Failed to transition to failed state after task kill");
+            }
             savePlanSafely(p);
             return;
         }
@@ -320,6 +336,11 @@ async function runTaskSubAgent(
                 feedback += `\n\n[Captured Events]:\n${output}`;
             }
             t.validatorFeedback = feedback;
+
+            // Transition to failed state
+            if (!transitionTo("failed", p)) {
+                console.warn("Failed to transition to failed state after non-zero exit");
+            }
             savePlanSafely(p);
             return;
         }

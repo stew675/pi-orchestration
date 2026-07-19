@@ -21,6 +21,7 @@ import { openSettingsMenu } from "../settings/settings-menu";
 import { AcceptOrEditDialog } from "../ui/accept-or-edit-dialog";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
+import { transitionTo } from "../core/state-machine";
 
 /**
  * Enter orchestration mode: capture current model, optionally switch to
@@ -104,7 +105,9 @@ function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
     );
 
     // Set status back so the runner can pick up the code-review flow via finishPlan
-    plan.status = "implementing";
+    if (!transitionTo("implementing", plan)) {
+        console.warn("Failed to transition to implementing state on code review resume");
+    }
     StateManager.savePlan(plan);
     Runner.runTasks(pi).catch((err: Error) => {
         console.error("Code review resume error:", err);
@@ -124,12 +127,16 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
     const next = findNextTaskToRun(plan);
     if (!next) {
         if (OrchestratorState.codeReviewModel) {
-            plan.status = "implementing";
+            if (!transitionTo("implementing", plan)) {
+                console.warn("Failed to transition to implementing state on resume (code review model)");
+            }
             StateManager.savePlan(plan);
             Runner.runTasks(pi);
             return;
         }
-        plan.status = "verifying";
+        if (!transitionTo("verifying", plan)) {
+            console.warn("Failed to transition to verifying state on resume");
+        }
         StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
             plan,
@@ -147,7 +154,9 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
         return;
     }
 
-    plan.status = "implementing";
+    if (!transitionTo("implementing", plan)) {
+        console.warn("Failed to transition to implementing state on resume (task found)");
+    }
     plan.currentTaskId = next.id;
     StateManager.savePlan(plan);
     sendResumeMessage(
@@ -164,7 +173,9 @@ function handleResumePlanning(_plan: OrchestrationPlan, pi: ExtensionAPI) {
 }
 
 function handleResumeFailed(plan: OrchestrationPlan, pi: ExtensionAPI) {
-    plan.status = "paused";
+    if (!transitionTo("paused", plan)) {
+        console.warn("Failed to transition to paused state on resume from failed");
+    }
     StateManager.savePlan(plan);
     sendResumeMessage(
         pi,
@@ -643,7 +654,11 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (plan && plan.status === "implementing") {
                 // Graceful pause: set status to 'pausing' so the Runner finishes
                 // the current task before stopping. No processes are killed.
-                plan.status = "pausing";
+                // Use 'paused' state for consistency
+                if (!transitionTo("paused", plan)) {
+                    ctx.ui.notify("Cannot pause execution", "error");
+                    return;
+                }
                 StateManager.savePlan(plan);
                 ctx.ui.notify(
                     "Orchestration pausing gracefully - current task will finish, then execution stops.",
@@ -721,7 +736,9 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             killAllProcesses("SIGKILL");
 
             // Mark plan as paused (preserves all state for later resume)
-            plan.status = "paused";
+            if (!transitionTo("paused", plan)) {
+                console.warn("Failed to transition to paused state on /om-stop");
+            }
             StateManager.savePlan(plan);
 
             ctx.ui.notify("Orchestration stopped. Plan preserved - use /om-resume to continue.", "warning");

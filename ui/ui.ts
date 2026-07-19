@@ -10,6 +10,7 @@ import {
     stripTaskPrefix,
     truncateToSentence
 } from "../core";
+import { getCurrentOrchestrationState, type OrchestrationState } from "../core/state-machine";
 import {
     MONITOR_POLL_INTERVAL_MS,
     getActiveTaskInfo,
@@ -58,18 +59,19 @@ function recolorBorderChars(line: string, borderColor: (s: string) => string): s
 
 type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim" | "muted" | "mdHeading" | "border" | "borderAccent";
 
-/** Resolve the semantic color for orchestration phase display. Uses computeExecutionPhaseLabel from core.ts to avoid duplicating status evaluation logic. */
+/** Resolve the semantic color for orchestration phase display. Uses state machine directly. */
 function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     if (!OrchestratorState.isActive || !OrchestratorState.theme) return null;
 
     const plan = StateManager.loadPlan();
     // No plan on disk yet - orchestration is active, so we're in the initial planning phase.
     if (!plan) {
-        return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "warning");
+        return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "mdHeading");
     }
 
-    const phaseLabel = computeExecutionPhaseLabel(plan);
-    const color: SemanticColor = (phaseLabel && PHASE_LABEL_COLORS[phaseLabel]) ?? "text";
+    // Get canonical state from state machine
+    const state = getCurrentOrchestrationState(plan);
+    const color: SemanticColor = STATE_COLORS[state] ?? "text";
 
     return OrchestratorState.theme.fg.bind(OrchestratorState.theme, color);
 }
@@ -129,7 +131,22 @@ interface PlanDisplayOptions {
     detailed?: boolean;
 }
 
-/** Lookup table mapping execution phase labels to semantic colors. */
+/** Lookup table mapping orchestration states to semantic colors. */
+const STATE_COLORS: Record<OrchestrationState, SemanticColor> = {
+    inactive: "text",
+    planning: "mdHeading",
+    reviewing: "borderAccent",
+    reviewed: "mdHeading",
+    implementing: "success",
+    paused: "warning",
+    resuming: "success",
+    failed: "error",
+    verifying: "accent",
+    completed: "border",
+    code_review: "borderAccent"
+};
+
+/** Lookup table mapping execution phase labels to semantic colors (for backward compatibility). */
 const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
     PLANNING: "mdHeading",
     SETUP: "warning",

@@ -6,10 +6,10 @@ import {
     DEFAULT_VALIDATOR_TIMEOUT_MS,
     DEFAULT_SUMMARY_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
-    DEFAULT_SUB_AGENT_MAX_TURNS,
-    EXECUTION_PHASE_STATUSES
+    DEFAULT_SUB_AGENT_MAX_TURNS
 } from "./types";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
+import { getCurrentOrchestrationState, type OrchestrationState } from "./state-machine";
 
 /**
  * Central orchestrator state singleton.
@@ -577,63 +577,29 @@ export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLA
 
 /**
  * Compute a granular execution phase label for display.
+ * Uses the state machine to derive the current state from OrchestratorState.
  * Returns null when not in an execution-like state (planning mode or inactive).
  */
 export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPhaseLabel | null {
-    // Single-pass count of task states
-    let activeCount = 0,
-        pendingCount = 0,
-        failedCount = 0,
-        clarifyingCount = 0;
-    for (const t of plan.tasks || []) {
-        if (EXECUTION_PHASE_STATUSES.includes(t.status as any)) activeCount++;
-        else if (t.status === "pending") pendingCount++;
-        else if (t.status === "failed") failedCount++;
-        else if (t.status === "awaiting_clarification") clarifyingCount++;
-    }
+    // Get canonical state from state machine
+    const state = getCurrentOrchestrationState(plan);
 
-    // Priority-ordered lookup: first matching condition wins
-    const priorityChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
-        { check: () => plan.status === "code_review", label: "REVIEWING" },
-        { check: () => plan.status === "verifying", label: "VERIFYING" },
-        { check: () => OrchestratorState._pauseReason === "stop" && plan.status === "paused", label: "STOPPED" },
-        {
-            check: () =>
-                OrchestratorState._pauseReason === "pause" && (plan.status === "paused" || plan.status === "pausing"),
-            label: "PAUSED"
-        },
-        { check: () => plan.status === "paused", label: "REPLANNING" },
-        { check: () => plan.status === "pausing", label: "PAUSED" }
-    ];
+    // Map state to phase label
+    const stateToPhase: Record<OrchestrationState, ExecutionPhaseLabel | null> = {
+        inactive: null,
+        planning: "PLANNING",
+        reviewing: "REVIEWING",
+        reviewed: "PLANNING",
+        implementing: "IMPLEMENTING",
+        paused: "PAUSED",
+        resuming: "IMPLEMENTING",
+        failed: "FAILED",
+        completed: "COMPLETED",
+        verifying: "VERIFYING",
+        code_review: "REVIEWING",
+    };
 
-    for (const { check, label } of priorityChecks) {
-        if (check()) return label;
-    }
-
-    // Executing states - distinguish sub-phases
-    if (plan.status === "implementing") {
-        const executionChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
-            { check: () => activeCount > 0, label: "IMPLEMENTING" },
-            { check: () => clarifyingCount > 0, label: "REPLANNING" },
-            { check: () => failedCount > 0, label: "REPLANNING" },
-            { check: () => pendingCount > 0 && activeCount === 0, label: "SETUP" }
-        ];
-
-        for (const { check, label } of executionChecks) {
-            if (check()) return label;
-        }
-
-        // No tasks at all — treat as SETUP (orchestrator hasn't created any yet)
-        return "SETUP";
-    }
-
-    // Terminal / non-execution states
-    if (plan.status === "planning") return "PLANNING";
-    if (plan.status === "completed") return "COMPLETED";
-    if (plan.status === "failed") return "FAILED";
-
-    // Fallback: should not normally reach here, but handle gracefully
-    return null;
+    return stateToPhase[state] ?? null;
 }
 
 /** Strip the `task_` prefix for display (label already says "Task:"). */

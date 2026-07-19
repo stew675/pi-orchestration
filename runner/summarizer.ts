@@ -6,6 +6,7 @@ import { StateManager } from "../context/state-manager";
 import { spawnAgent } from "../process/process-manager";
 import { savePlanSafely } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
+import { transitionTo, getCurrentOrchestrationState } from "../core/state-machine";
 
 // ---------------------------------------------------------------------------
 // Pending summaries tracking - allows plan completion to await all in-flight
@@ -219,6 +220,19 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     const summaryText =
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
     t.result = { ...(t.result || {}), summary: summaryText };
+
+    // Transition to implementing or verifying state based on task completion
+    const currentState = getCurrentOrchestrationState(p);
+    const allCompleted = p.tasks.every((t) => t.status === "completed");
+    if (allCompleted && currentState === "implementing") {
+        if (!transitionTo("verifying", p)) {
+            console.warn("Failed to transition to verifying state after all tasks completed");
+        }
+    } else if (currentState === "implementing" || currentState === "resuming") {
+        // Keep in implementing if there are still tasks to complete
+        transitionTo("implementing", p);
+    }
+
     savePlanSafely(p);
 
     // Now that it's actually completed (with summary), archive the final result.
