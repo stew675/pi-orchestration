@@ -4,7 +4,7 @@ import { OrchestratorState, getPi } from "../core";
 import * as monitor from "../process/monitor";
 import { StateManager } from "../context/state-manager";
 import { spawnAgent } from "../process/process-manager";
-import { savePlanSafely } from "./utils";
+import { savePlanSafely, notifyTuiOnly } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
 import { transitionTo, getCurrentOrchestrationState } from "../core/state-machine";
 
@@ -101,7 +101,7 @@ export async function completeTaskWithSummary(task: Task, model?: ModelRef, sess
             ).finally(() => releaseSummarySlot());
             pendingSummaries.set(taskId, summaryPromise);
         }).catch((err: Error) => {
-            console.error(`[task-summary ${taskId}] Async summary chain error (before spawn):`, err);
+            notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Async summary chain error (before spawn): ${String(err)}`);
         });
     } else {
         // Synchronous path - await summary inline (original behavior)
@@ -179,11 +179,11 @@ function resumeRunnerAfterSummary(): void {
             const pi = getPi();
             import("../runner").then(({ Runner }) => {
                 Runner.runTasks(pi).catch((err: Error) => {
-                    console.error("Runner failed to auto-resume after background task summary:", err);
+                    notifyTuiOnly(OrchestratorState.pi, "Runner failed to auto-resume after background task summary: " + String(err));
                 });
             });
         } catch (err) {
-            console.error("Could not auto-resume runner:", err);
+            notifyTuiOnly(OrchestratorState.pi, "Could not auto-resume runner: " + String(err));
         }
     }
 }
@@ -192,22 +192,18 @@ function resumeRunnerAfterSummary(): void {
 function finalizeTaskSummary(taskId: string, result: { summary?: string; error?: string } | null): void {
     const p = StateManager.loadPlan();
     if (!p) {
-        console.warn(
-            `[task-summary ${taskId}] Plan not found - cannot finalize summary. Task will remain in its current state until the next recovery cycle.`
-        );
+        notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Plan not found - cannot finalize summary. Task will remain in its current state until the next recovery cycle.`);
         return;
     }
 
     const t = p.tasks.find((x) => x.id === taskId);
     if (!t) {
-        console.warn(
-            `[task-summary ${taskId}] Task not found in plan - cannot finalize summary. The task may have been removed.`
-        );
+        notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Task not found in plan - cannot finalize summary. The task may have been removed.`);
         return;
     }
 
     if (result?.error) {
-        console.warn(`[task-summary ${taskId}] Failed to generate summary: ${result.error}`);
+        notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Failed to generate summary: ${result.error}`);
         t.status = "failed";
         t.validatorFeedback = `Summary generation failed: ${result.error}`;
         savePlanSafely(p);
@@ -226,7 +222,7 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     const allCompleted = p.tasks.every((t) => t.status === "completed");
     if (allCompleted && currentState === "implementing") {
         if (!transitionTo("verifying", p)) {
-            console.warn("Failed to transition to verifying state after all tasks completed");
+            notifyTuiOnly(OrchestratorState.pi, "Failed to transition to verifying state after all tasks completed");
         }
     } else if (currentState === "implementing" || currentState === "resuming") {
         // Keep in implementing if there are still tasks to complete
@@ -351,7 +347,7 @@ async function generateTaskSummary(
             return { summary: result.summary };
         }
         // Retryable failure (no output or crash)
-        console.warn(`[task-summary ${task.id}] Attempt ${attempt + 1}/${maxAttempts}: ${result.error}, retrying...`);
+        notifyTuiOnly(OrchestratorState.pi, `[task-summary ${task.id}] Attempt ${attempt + 1}/${maxAttempts}: ${result.error}, retrying...`);
     }
 
     // All attempts exhausted - persist final error.
@@ -447,7 +443,7 @@ async function runSummaryOnce(
         child.on("error", (err) => {
             clearTimeout();
             // Don't clear active task - another sub-agent may be running concurrently
-            console.warn(`[task-summary ${taskId}] Error: ${err.message}`);
+            notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Error: ${err.message}`);
             resolve({ error: err.message });
         });
     });

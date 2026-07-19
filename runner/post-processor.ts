@@ -2,7 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Task } from "../core/types";
 import { MAX_CLARIFICATIONS } from "../core/types";
 import { StateManager } from "../context/state-manager";
-import { notifyOrchestrator, savePlanSafely } from "./utils";
+import { OrchestratorState } from "../core";
+import { notifyOrchestrator, savePlanSafely, notifyTuiOnly } from "./utils";
 import { transitionTo } from "../core/state-machine";
 
 // --- Contextual recovery guidance strategies ---
@@ -89,7 +90,7 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
         if (postTask?.status === "failed") {
             // Transition to failed state
             if (!transitionTo("failed", postPlan)) {
-                console.warn("Failed to transition to failed state in post-processor");
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state in post-processor");
             }
             savePlanSafely(postPlan);
 
@@ -107,7 +108,7 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
         if (afterTaskPlan?.status === "pausing") {
             // Transition to paused state
             if (!transitionTo("paused", afterTaskPlan)) {
-                console.warn("Failed to transition to paused state in post-processor");
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to paused state in post-processor");
             }
             savePlanSafely(afterTaskPlan);
             return notifyAndStop(pi, `System: Paused gracefully after task '${task.id}'.`);
@@ -115,7 +116,7 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
 
         return true;
     } catch (e) {
-        console.error(`Error in processTaskResult for task ${task.id}:`, e);
+        notifyTuiOnly(OrchestratorState.pi, `Error in processTaskResult for task ${task.id}: ${String(e)}`);
         if (pi) {
             notifyOrchestrator(
                 pi,

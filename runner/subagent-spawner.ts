@@ -66,9 +66,8 @@ export async function runSubAgent(options: SubAgentOptions): Promise<SubAgentRes
 
         const loopDetector = new LoopDetector({
             onLoopDetected: (info) => {
-                console.warn(
-                    `[sub-agent ${options.taskId}] Loop detected - cycle of ${info.cycleLen} event(s), ${info.cycles} repetitions. Killing process.`
-                );
+                const p = OrchestratorState.pi;
+                if (p) { try { p.appendEntry("orchestration-status", { title: "Loop detected", message: `[sub-agent ${options.taskId}] Loop detected - cycle of ${info.cycleLen} event(s), ${info.cycles} repetitions. Killing process.`, timestamp: Date.now() }); } catch {} }
                 loopKilled = true;
                 if (!child.killed) child.kill("SIGTERM");
             }

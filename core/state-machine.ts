@@ -64,6 +64,16 @@ export function getCurrentOrchestrationState(_plan: OrchestrationPlan | null): O
   return OrchestratorState.currentState;
 }
 
+/** Fire TUI-only notification (non-fatal). */
+function notifyTui(msg: string): void {
+    const pi = OrchestratorState.pi;
+    if (pi) {
+        try {
+            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
+        } catch { /* non-fatal */ }
+    }
+}
+
 /**
  * State transition function with validation.
  * Returns true if transition was successful, false if invalid.
@@ -73,7 +83,7 @@ export function transitionTo(newState: OrchestrationState, plan: OrchestrationPl
   const currentState = OrchestratorState.currentState;
 
   if (!STATE_TRANSITIONS[currentState].includes(newState)) {
-    console.warn(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
+    notifyTui(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
     return false;
   }
 

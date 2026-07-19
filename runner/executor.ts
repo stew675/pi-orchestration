@@ -8,7 +8,7 @@ import { OrchestratorState, resolveTaskModelByComplexity, resolveValidatorModel,
 import { StateManager } from "../context/state-manager";
 import { buildTaskContext } from "../context/context-builder";
 import * as monitor from "../process/monitor";
-import { notifyOrchestrator, savePlanSafely } from "./utils";
+import { notifyOrchestrator, savePlanSafely, notifyTuiOnly } from "./utils";
 import { runSubAgent } from "./subagent-spawner";
 import type { SubAgentResult } from "./subagent-spawner";
 import { validateTask } from "./validator";
@@ -59,7 +59,7 @@ export async function executeTask(
 
         // Ensure we're in implementing state
         if (!transitionTo("implementing", currentPlan)) {
-            console.warn("Failed to transition to implementing state when starting task");
+            notifyTuiOnly(OrchestratorState.pi || (await import("../core")).getPi(), "Failed to transition to implementing state when starting task");
         }
         savePlanSafely(currentPlan);
 
@@ -82,7 +82,7 @@ export async function executeTask(
         // Post-task processing
         return postProcessTaskResult(task, pi);
     } catch (e) {
-        console.error(`Error executing task ${task.id}:`, e);
+        notifyTuiOnly(pi || OrchestratorState.pi || (await import("../core")).getPi(), `Error executing task ${task.id}: ${String(e)}`);
 
         // Reset orphaned task status so scheduler can retry on next cycle.
         try {
@@ -94,11 +94,11 @@ export async function executeTask(
                     t.attempts++;
                     delete t.startedAt;
                     savePlanSafely(p);
-                    console.warn(`Task ${task.id} reset from 'running' to 'pending' after unexpected error.`);
+                    notifyTuiOnly(pi || OrchestratorState.pi, `Task ${task.id} reset from 'running' to 'pending' after unexpected error.`);
                 }
             }
         } catch (resetErr) {
-            console.error(`Failed to reset task ${task.id} status:`, resetErr);
+            notifyTuiOnly(pi || OrchestratorState.pi, `Failed to reset task ${task.id} status: ${String(resetErr)}`);
         }
 
         if (pi) {
@@ -219,7 +219,7 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
 
     if (isRecoverable && !isReadOnly) {
         // Auto-complete with validator note appended to summary
-        console.warn(`[validator ${t.id}] Recoverable failure - auto-completing. Feedback: ${feedback}`);
+        notifyTuiOnly(OrchestratorState.pi, `[validator ${t.id}] Recoverable failure - auto-completing. Feedback: ${feedback}`);
         t.validatorFeedback = `Validator noted: ${feedback} (auto-completed; sub-agent exited cleanly)`;
         await completeTaskWithSummary(t, resolveSummaryModel(model), fullTranscript);
     } else {
@@ -320,7 +320,7 @@ async function runTaskSubAgent(
 
             // Transition to failed state
             if (!transitionTo("failed", p)) {
-                console.warn("Failed to transition to failed state after task kill");
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after task kill");
             }
             savePlanSafely(p);
             return;
@@ -339,7 +339,7 @@ async function runTaskSubAgent(
 
             // Transition to failed state
             if (!transitionTo("failed", p)) {
-                console.warn("Failed to transition to failed state after non-zero exit");
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after non-zero exit");
             }
             savePlanSafely(p);
             return;

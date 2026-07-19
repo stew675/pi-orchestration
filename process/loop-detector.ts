@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------------------
 
 import { SubAgentEvent, getEventToolName, getEventParams } from "../core/types";
+import { OrchestratorState } from "../core";
 
 /** How many full repeats before we kill the process. */
 const REQUIRED_CYCLES = 5;
@@ -144,10 +145,8 @@ export class LoopDetector {
                     const count = (this.fileReadCounts.get(path) || 0) + 1;
                     this.fileReadCounts.set(path, count);
                     if (count === 11) {
-                        console.warn(
-                            `[LoopDetector] Sub-agent has read file "${path}" more than 10 times (${count} times). ` +
-                            `This might indicate a paging/scrolling loop or highly chunked exploration of a large file.`
-                        );
+                        const p = OrchestratorState.pi;
+                        if (p) { try { p.appendEntry("orchestration-status", { title: "File read loop detected", message: `[LoopDetector] Sub-agent has read file "${path}" more than 10 times (${count} times). This might indicate a paging/scrolling loop or highly chunked exploration of a large file.`, timestamp: Date.now() }); } catch {} }
                     }
                 }
             }

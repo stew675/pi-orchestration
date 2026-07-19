@@ -51,6 +51,7 @@ import {
     ORCHESTRATOR_REVIEW_SYSTEM_PROMPT,
     ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT
 } from "./context/prompts";
+import { notifyTuiOnly } from "./runner/utils";
 
 /** Watchdog timer interval (ms) — checks for stalled orchestrator every 2 seconds during execution. */
 const WATCHDOG_INTERVAL_MS = 2000;
@@ -157,7 +158,7 @@ export default function (pi: ExtensionAPI) {
                 try {
                     StateManager.savePlan(plan);
                 } catch (e) {
-                    console.error("Failed to persist recovered tasks during shutdown:", e);
+                    notifyTuiOnly(pi, "Failed to persist recovered tasks during shutdown: " + String(e));
                 }
             }
         }
@@ -250,7 +251,7 @@ export default function (pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (plan) {
                 if (!transitionTo("completed", plan)) {
-                    console.warn("Failed to transition to completed state after approve_goal");
+                    notifyTuiOnly(pi, "Failed to transition to completed state after approve_goal");
                 }
                 StateManager.savePlan(plan);
             }
@@ -293,7 +294,7 @@ export default function (pi: ExtensionAPI) {
                     await showAcceptOrEditDialog(pi, ctx);
                 }
             } catch (e) {
-                console.error("Failed to switch to reviewer model:", e);
+                notifyTuiOnly(pi, "Failed to switch to reviewer model: " + String(e));
                 OrchestratorState._inReviewPhase = false;
                 OrchestratorState._planJustUpdated = true;
                 await showAcceptOrEditDialog(pi, ctx);
@@ -317,7 +318,7 @@ export default function (pi: ExtensionAPI) {
                     { triggerTurn: true }
                 );
             } catch (e) {
-                console.error("Failed to restore from review phase:", e);
+                notifyTuiOnly(pi, "Failed to restore from review phase: " + String(e));
             }
             return;
         }
@@ -361,7 +362,8 @@ export default function (pi: ExtensionAPI) {
             if (getLastTurnSignature() === signature) {
                 incrementConsecutiveCount();
                 if (getConsecutiveCount() >= ORCHESTRATOR_LOOP_THRESHOLD && !isLoopBreakerFired()) {
-                    console.warn(
+                    notifyTuiOnly(
+                        pi,
                         `[orchestrator] Loop detected - ${getConsecutiveCount()} consecutive identical turns. Sending nudge message.`
                     );
                     setLoopBreakerFired();
@@ -377,7 +379,7 @@ export default function (pi: ExtensionAPI) {
                             { triggerTurn: true }
                         );
                     } catch (e) {
-                        console.error("Failed to send loop-breaker message:", e);
+                        notifyTuiOnly(pi, "Failed to send loop-breaker message: " + String(e));
                     }
                 }
             } else {
@@ -431,9 +433,8 @@ function enforceSubAgentLimits(): void {
         if (idleMs > 0 && state.lastActivityAt !== null) {
             const elapsedSinceLastActivity = Date.now() - state.lastActivityAt;
             if (elapsedSinceLastActivity > idleMs) {
-                console.warn(
-                    `[watchdog] Sub-agent ${agentId} idle timeout — no JSON stream activity for ${formatTimeout(idleMs)} (last seen ${(elapsedSinceLastActivity / 1000).toFixed(0)}s ago). Killing.`
-                );
+                const _p = OrchestratorState.pi;
+                if (_p) { try { _p.appendEntry("orchestration-status", { title: "Sub-agent idle timeout", message: `[watchdog] Sub-agent ${agentId} idle timeout — no JSON stream activity for ${formatTimeout(idleMs)} (last seen ${(elapsedSinceLastActivity / 1000).toFixed(0)}s ago). Killing.`, timestamp: Date.now() }); } catch {} }
                 child.kill("SIGTERM");
                 state.killedByWatchdog = "idle_timeout";
                 continue; // don't also check max-turns for the same agent
@@ -442,9 +443,8 @@ function enforceSubAgentLimits(): void {
 
         // Check max turns.
         if (maxTurns > 0 && state.turnCount >= maxTurns) {
-            console.warn(
-                `[watchdog] Sub-agent ${agentId} exceeded max turns limit of ${maxTurns} (at turn ${state.turnCount}). Killing.`
-            );
+            const _p = OrchestratorState.pi;
+            if (_p) { try { _p.appendEntry("orchestration-status", { title: "Sub-agent max turns exceeded", message: `[watchdog] Sub-agent ${agentId} exceeded max turns limit of ${maxTurns} (at turn ${state.turnCount}). Killing.`, timestamp: Date.now() }); } catch {} }
             child.kill("SIGTERM");
             state.killedByWatchdog = "max_turns";
         }

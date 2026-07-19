@@ -35,19 +35,22 @@ export function notifyOrchestrator(pi: ExtensionAPI, message: string, options?: 
             { triggerTurn: true }
         );
     } catch (e) {
-        console.error("Failed to send orchestrator notification:", e);
+        const p = OrchestratorState.pi; if (p) { try { p.appendEntry("orchestration-status", { title: "Notification failed", message: "Failed to send orchestrator notification: " + String(e), timestamp: Date.now() }); } catch {} }
     }
 }
 
 /**
  * TUI-only status update. Appends a visual entry but does NOT wake the orchestrator.
  * Use when background work is in progress and the orchestrator should not be disturbed.
+ * If pi is undefined, falls back to OrchestratorState.pi internally.
  */
-export function notifyTuiOnly(pi: ExtensionAPI, message: string): void {
+export function notifyTuiOnly(pi: ExtensionAPI | undefined, message: string): void {
+    const targetPi = pi || OrchestratorState.pi;
+    if (!targetPi) return; // nothing we can do
     try {
-        appendOrchestratorStatusEntry(pi, message);
+        appendOrchestratorStatusEntry(targetPi, message);
     } catch (e) {
-        console.warn("Failed to append TUI-only status:", e);
+        // Non-fatal - TUI notification itself failed, nothing we can do
     }
 }
 
@@ -76,7 +79,7 @@ function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void 
         });
     } catch (e) {
         // Non-fatal - status entry is purely cosmetic. The sendMessage below still works.
-        console.warn("Failed to append orchestration status entry:", e);
+        // Non-fatal - TUI status entry is purely cosmetic, ignoring error
     }
 }
 

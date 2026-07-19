@@ -42,7 +42,7 @@ export async function runTasks(
         try {
             const plan = StateManager.loadPlan();
             if (!plan) {
-                console.error(`Runner: No plan found.`);
+                notifyTuiOnly(pi, "Runner: No plan found.");
                 notifyOrchestrator(
                     pi,
                     "System: plan.json is corrupted or unreadable. Execution stopped. Run /om-reset to start fresh."
@@ -100,7 +100,7 @@ export async function runTasks(
                 if (failedTasks.length > 0) {
                     // Transition to paused state
                     if (!transitionTo("paused", plan)) {
-                        console.warn("Failed to transition to paused state due to failed tasks");
+                        notifyTuiOnly(pi, "Failed to transition to paused state due to failed tasks");
                     }
                     savePlanSafely(plan);
                     // Include failed task's feedback so orchestrator has context for recovery
@@ -124,7 +124,7 @@ export async function runTasks(
                 if (!allCompleted) {
                     // Transition to paused state
                     if (!transitionTo("paused", plan)) {
-                        console.warn("Failed to transition to paused state due to stalled execution");
+                        notifyTuiOnly(pi, "Failed to transition to paused state due to stalled execution");
                     }
                     savePlanSafely(plan);
                     notifyOrchestrator(
@@ -169,11 +169,11 @@ function spawnSiblingRunner(pi: ExtensionAPI, model?: ModelRef): void {
     import("../runner")
         .then(({ Runner }) => {
             Runner.runTasks(pi, model).catch((err: Error) => {
-                console.error("Sibling runner error:", err);
+                notifyTuiOnly(pi, "Sibling runner error: " + String(err));
             });
         })
         .catch((err: Error) => {
-            console.error("Failed to spawn sibling runner:", err);
+            notifyTuiOnly(pi, "Failed to spawn sibling runner: " + String(err));
         });
 }
 
@@ -218,7 +218,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                     );
                 }
             } catch (err) {
-                console.error("Code review execution failed:", err);
+                notifyTuiOnly(pi, "Code review execution failed: " + String(err));
                 notifyOrchestrator(
                     pi,
                     `System: Code review sub-agent error (${err instanceof Error ? err.message : String(err)}). Proceeding to final review without code review.`,

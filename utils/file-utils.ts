@@ -1,4 +1,15 @@
 import * as fs from "node:fs";
+import { OrchestratorState } from "../core";
+
+/** Fire TUI-only notification (non-fatal). */
+function notifyTui(msg: string): void {
+    const pi = OrchestratorState.pi;
+    if (pi) {
+        try {
+            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
+        } catch { /* non-fatal */ }
+    }
+}
 
 const MAX_FILE_SIZE = 50_000; // 50KB cap on injected file contents
 
@@ -50,7 +61,7 @@ export function readTextFile(filePath: string): string | null {
     try {
         const buffer = fs.readFileSync(filePath);
         if (buffer.length > MAX_FILE_SIZE) {
-            console.warn(`Skipping ${filePath}: exceeds ${MAX_FILE_SIZE} byte limit`);
+            notifyTui(`Skipping ${filePath}: exceeds ${MAX_FILE_SIZE} byte limit`);
             return null;
         }
         // Reject well-known binary formats by magic bytes

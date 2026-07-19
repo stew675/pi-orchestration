@@ -247,7 +247,10 @@ export async function switchToOrchestrationModel(
 
     const targetModel = ctx.modelRegistry.find(orchModel.provider, orchModel.id);
     if (!targetModel) {
-        console.warn(`Orchestration model ${orchModel.provider}/${orchModel.id} not found in registry.`);
+        const pi = OrchestratorState.pi;
+        if (pi) {
+            try { pi.appendEntry("orchestration-status", { title: "Orchestration model not found", message: `Orchestration model ${orchModel.provider}/${orchModel.id} not found in registry.`, timestamp: Date.now() }); } catch {}
+        }
         return false;
     }
 
@@ -255,7 +258,10 @@ export async function switchToOrchestrationModel(
     if (success) {
         return true;
     }
-    console.warn(`No API key available for orchestration model ${orchModel.provider}/${orchModel.id}.`);
+    const pi2 = OrchestratorState.pi;
+    if (pi2) {
+        try { pi2.appendEntry("orchestration-status", { title: "No API key for orchestration model", message: `No API key available for orchestration model ${orchModel.provider}/${orchModel.id}.`, timestamp: Date.now() }); } catch {}
+    }
     return false;
 }
 
@@ -272,7 +278,8 @@ export async function restoreMainModel(
 
     const targetModel = ctx.modelRegistry.find(original.provider, original.id);
     if (!targetModel) {
-        console.warn(`Original model ${original.provider}/${original.id} not found in registry.`);
+        const p = OrchestratorState.pi;
+        if (p) { try { p.appendEntry("orchestration-status", { title: "Original model not found", message: `Original model ${original.provider}/${original.id} not found in registry.`, timestamp: Date.now() }); } catch {} }
         return false;
     }
 
@@ -281,7 +288,8 @@ export async function restoreMainModel(
     if (success) {
         return true;
     }
-    console.warn(`No API key available for original model ${original.provider}/${original.id}.`);
+    const p2 = OrchestratorState.pi;
+    if (p2) { try { p2.appendEntry("orchestration-status", { title: "No API key for original model", message: `No API key available for original model ${original.provider}/${original.id}.`, timestamp: Date.now() }); } catch {} }
     return false;
 }
 
@@ -308,7 +316,8 @@ export async function enterPlanningMode(
 
     const targetModel = ctx.modelRegistry.find(planningModel.provider, planningModel.id);
     if (!targetModel) {
-        console.warn(`Planning model ${planningModel.provider}/${planningModel.id} not found in registry.`);
+        const p = OrchestratorState.pi;
+        if (p) { try { p.appendEntry("orchestration-status", { title: "Planning model not found", message: `Planning model ${planningModel.provider}/${planningModel.id} not found in registry.`, timestamp: Date.now() }); } catch {} }
         return;
     }
 
@@ -316,7 +325,8 @@ export async function enterPlanningMode(
     if (success) {
         ctx.ui?.notify?.(`Switched to planning model: ${planningModel.provider}/${planningModel.id}`, "info");
     } else {
-        console.warn(`No API key available for planning model ${planningModel.provider}/${planningModel.id}.`);
+        const _p1 = OrchestratorState.pi;
+        if (_p1) { try { _p1.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for planning model ${planningModel.provider}/${planningModel.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot switch to planning model ${planningModel.provider}/${planningModel.id} - no configured API key.`,
             "warning"
@@ -340,7 +350,8 @@ export async function exitPlanningMode(
 
     const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
     if (!targetModel) {
-        console.warn(`Pre-planning model ${pre.provider}/${pre.id} not found in registry.`);
+        const _p2 = OrchestratorState.pi;
+        if (_p2) { try { _p2.appendEntry("orchestration-status", { title: "Orchestration status", message: `Pre-planning model ${pre.provider}/${pre.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
         OrchestratorState.prePlanningModel = undefined;
         return;
     }
@@ -349,7 +360,8 @@ export async function exitPlanningMode(
     if (success) {
         ctx.ui?.notify?.("Restored pre-planning model.", "info");
     } else {
-        console.warn(`No API key available for pre-planning model ${pre.provider}/${pre.id}.`);
+        const _p3 = OrchestratorState.pi;
+        if (_p3) { try { _p3.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for pre-planning model ${pre.provider}/${pre.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot restore pre-planning model ${pre.provider}/${pre.id} - no configured API key.`,
             "warning"
@@ -377,7 +389,8 @@ export async function switchToReviewerModel(
 
     const targetModel = ctx.modelRegistry.find(reviewerModel.provider, reviewerModel.id);
     if (!targetModel) {
-        console.warn(`Reviewer model ${reviewerModel.provider}/${reviewerModel.id} not found in registry.`);
+        const _p4 = OrchestratorState.pi;
+        if (_p4) { try { _p4.appendEntry("orchestration-status", { title: "Orchestration status", message: `Reviewer model ${reviewerModel.provider}/${reviewerModel.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
         return false;
     }
 
@@ -385,7 +398,8 @@ export async function switchToReviewerModel(
     if (success) {
         ctx.ui?.notify?.(`Switched to reviewer model: ${reviewerModel.provider}/${reviewerModel.id}`, "info");
     } else {
-        console.warn(`No API key available for reviewer model ${reviewerModel.provider}/${reviewerModel.id}.`);
+        const _p5 = OrchestratorState.pi;
+        if (_p5) { try { _p5.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for reviewer model ${reviewerModel.provider}/${reviewerModel.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot switch to reviewer model ${reviewerModel.provider}/${reviewerModel.id} - no configured API key.`,
             "warning"
@@ -410,7 +424,8 @@ export async function restoreFromReviewPhase(
 
     const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
     if (!targetModel) {
-        console.warn(`Pre-review model ${pre.provider}/${pre.id} not found in registry.`);
+        const _p6 = OrchestratorState.pi;
+        if (_p6) { try { _p6.appendEntry("orchestration-status", { title: "Orchestration status", message: `Pre-review model ${pre.provider}/${pre.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
         OrchestratorState.preReviewModel = undefined;
         return;
     }
@@ -419,7 +434,8 @@ export async function restoreFromReviewPhase(
     if (success) {
         ctx.ui?.notify?.("Restored pre-review model.", "info");
     } else {
-        console.warn(`No API key available for pre-review model ${pre.provider}/${pre.id}.`);
+        const _p7 = OrchestratorState.pi;
+        if (_p7) { try { _p7.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for pre-review model ${pre.provider}/${pre.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot restore pre-review model ${pre.provider}/${pre.id} - no configured API key.`,
             "warning"

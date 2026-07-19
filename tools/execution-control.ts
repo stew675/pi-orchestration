@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { StateManager } from "../context/state-manager";
-import { Runner, notifyOrchestrator } from "../runner";
+import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
 import { detectFileConflicts, formatFileConflictError } from "../validation/validation";
@@ -140,7 +140,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             signalTaskStarted();
 
             Runner.runTasks(getPi()).catch((err) => {
-                console.error("Runner error:", err);
+                notifyTuiOnly(pi, "Runner error: " + String(err));
                 notifyOrchestrator(
                     getPi(),
                     `System: Task execution failed to start: ${err instanceof Error ? err.message : String(err)}.`
@@ -272,7 +272,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 taskId: params.taskId,
                 answer: params.answer
             }).catch((err) => {
-                console.error("Runner error on resume:", err);
+                notifyTuiOnly(pi, "Runner error on resume: " + String(err));
                 notifyOrchestrator(
                     getPi(),
                     `System: Failed to resume task '${params.taskId}': ${err instanceof Error ? err.message : String(err)}.`
@@ -323,7 +323,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (plan) {
                 if (!transitionTo("paused", plan)) {
-                    console.warn("Failed to transition to paused state on stop");
+                    notifyTuiOnly(pi, "Failed to transition to paused state on stop");
                 }
                 StateManager.savePlan(plan);
             }

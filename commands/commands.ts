@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { StateManager } from "../context/state-manager";
 import { PLANNING_HINT_EDIT } from "../context/prompts";
 import { killAllProcesses } from "../process/process-manager";
-import { buildFinalReviewMessage } from "../runner/utils";
+import { buildFinalReviewMessage, notifyTuiOnly } from "../runner/utils";
 import { Runner } from "../runner";
 import {
     OrchestratorState,
@@ -106,11 +106,11 @@ function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
 
     // Set status back so the runner can pick up the code-review flow via finishPlan
     if (!transitionTo("implementing", plan)) {
-        console.warn("Failed to transition to implementing state on code review resume");
+        notifyTuiOnly(pi, "Failed to transition to implementing state on code review resume");
     }
     StateManager.savePlan(plan);
     Runner.runTasks(pi).catch((err: Error) => {
-        console.error("Code review resume error:", err);
+        notifyTuiOnly(pi, "Code review resume error: " + String(err));
     });
 }
 
@@ -128,14 +128,14 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
     if (!next) {
         if (OrchestratorState.codeReviewModel) {
             if (!transitionTo("implementing", plan)) {
-                console.warn("Failed to transition to implementing state on resume (code review model)");
+                notifyTuiOnly(pi, "Failed to transition to implementing state on resume (code review model)");
             }
             StateManager.savePlan(plan);
             Runner.runTasks(pi);
             return;
         }
         if (!transitionTo("verifying", plan)) {
-            console.warn("Failed to transition to verifying state on resume");
+            notifyTuiOnly(pi, "Failed to transition to verifying state on resume");
         }
         StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
@@ -155,7 +155,7 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
     }
 
     if (!transitionTo("implementing", plan)) {
-        console.warn("Failed to transition to implementing state on resume (task found)");
+        notifyTuiOnly(pi, "Failed to transition to implementing state on resume (task found)");
     }
     plan.currentTaskId = next.id;
     StateManager.savePlan(plan);
@@ -174,7 +174,7 @@ function handleResumePlanning(_plan: OrchestrationPlan, pi: ExtensionAPI) {
 
 function handleResumeFailed(plan: OrchestrationPlan, pi: ExtensionAPI) {
     if (!transitionTo("paused", plan)) {
-        console.warn("Failed to transition to paused state on resume from failed");
+        notifyTuiOnly(pi, "Failed to transition to paused state on resume from failed");
     }
     StateManager.savePlan(plan);
     sendResumeMessage(
@@ -457,7 +457,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     const plan = StateManager.loadPlan();
     if (plan && plan.status !== "completed" && plan.tasks.length > 0) {
         if (!transitionTo("setup", plan)) {
-            console.warn("Failed to transition to setup state in startExecutionFromPlan");
+            notifyTuiOnly(pi, "Failed to transition to setup state in startExecutionFromPlan");
         }
         StateManager.savePlan(plan);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
@@ -735,7 +735,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
             // Mark plan as paused (preserves all state for later resume)
             if (!transitionTo("paused", plan)) {
-                console.warn("Failed to transition to paused state on /om-stop");
+                notifyTuiOnly(pi, "Failed to transition to paused state on /om-stop");
             }
             StateManager.savePlan(plan);
 
