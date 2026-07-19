@@ -573,7 +573,7 @@ export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
 }
 
 /** Granular execution phase labels for the TUI status display. */
-export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "REVIEWING" | "IDLE";
+export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "REVIEWING" | "COMPLETED" | "FAILED";
 
 /**
  * Compute a granular execution phase label for display.
@@ -623,11 +623,16 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
             if (check()) return label;
         }
 
-        // Nothing at all happening → IDLE fallback
-        return "IDLE";
+        // No tasks at all — treat as SETUP (orchestrator hasn't created any yet)
+        return "SETUP";
     }
 
-    // Planning mode or other states - handled by existing logic in ui.ts
+    // Terminal / non-execution states
+    if (plan.status === "planning") return "PLANNING";
+    if (plan.status === "completed") return "COMPLETED";
+    if (plan.status === "failed") return "FAILED";
+
+    // Fallback: should not normally reach here, but handle gracefully
     return null;
 }
 

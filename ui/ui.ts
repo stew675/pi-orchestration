@@ -64,25 +64,12 @@ function getOrchestrationPhaseColor(): ((s: string) => string) | null {
 
     const plan = StateManager.loadPlan();
     // No plan on disk yet - orchestration is active, so we're in the initial planning phase.
-    // Return amber (warning) to indicate "building a plan" state.
     if (!plan) {
         return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "warning");
     }
 
     const phaseLabel = computeExecutionPhaseLabel(plan);
-    let color: SemanticColor;
-
-    if (phaseLabel) {
-        // Use the shared PHASE_LABEL_COLORS lookup table - same one used by buildPlanDisplay / resolveStatusLabelAndColor.
-        color = PHASE_LABEL_COLORS[phaseLabel] ?? "text";
-    } else {
-        // Not in execution mode - fall back to plan status colors (planning, pausing, etc.)
-        if (OrchestratorState.planningMode) {
-            color = PLAN_STATUS_COLORS["planning"] ?? "warning";
-        } else {
-            color = PLAN_STATUS_COLORS[plan.status] ?? "accent";
-        }
-    }
+    const color: SemanticColor = (phaseLabel && PHASE_LABEL_COLORS[phaseLabel]) ?? "text";
 
     return OrchestratorState.theme.fg.bind(OrchestratorState.theme, color);
 }
@@ -152,31 +139,18 @@ const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
     REVIEWING: "accent",
     PAUSED: "warning",
     STOPPED: "error",
-    IDLE: "dim"
-};
-
-/** Lookup table mapping non-execution plan statuses to semantic colors. */
-const PLAN_STATUS_COLORS: Record<string, SemanticColor> = {
-    planning: "warning",
-    implementing: "success",
-    pausing: "warning",
-    paused: "warning",
-    verifying: "accent",
-    reviewing: "accent",
-    code_review: "accent",
-    completed: "accent",
-    failed: "error"
+    COMPLETED: "accent",
+    FAILED: "error"
 };
 
 function resolveStatusLabelAndColor(
     phaseLabel: string | null | undefined,
-    planStatus: string
 ): { label: string; color: SemanticColor } {
     if (phaseLabel) {
         return { label: phaseLabel, color: PHASE_LABEL_COLORS[phaseLabel] ?? "text" };
     }
-    const fallback = PLAN_STATUS_COLORS[planStatus];
-    return { label: planStatus.toUpperCase(), color: fallback ?? "accent" };
+    // Fallback: should not normally happen now that computeExecutionPhaseLabel is exhaustive.
+    return { label: "COMPLETED", color: "accent" };
 }
 
 /** Strategy map for phase-detail message rendering. */
@@ -226,22 +200,13 @@ const PHASE_DETAIL_RENDERERS: Record<
         lines.push(t.fg("error", "  -> Execution stopped by user (/om-stop)"));
         lines.push(t.fg("dim", "  Use /om-resume to continue or /om-reset to start fresh"));
     },
-    IDLE: (lines, _plan, t) => {
-        lines.push(t.fg("dim", "  -> Orchestrator idle"));
-    }
-};
-
-/** Lookup table mapping non-execution plan statuses to detail message renderers. */
-const PLAN_STATUS_DETAIL_RENDERERS: Record<
-    string,
-    (lines: string[], theme: { fg: (color: SemanticColor, text: string) => string }) => void
-> = {
-    planning: (lines, t) => lines.push(t.fg("text", "  -> Building plan...")),
-    implementing: (lines, t) => lines.push(t.fg("warning", "  -> Preparing to implement tasks")),
-    pausing: (lines, t) => lines.push(t.fg("warning", "  -> Pausing gracefully (current task finishing...)")),
-    verifying: (lines, t) => lines.push(t.fg("accent", "  -> Final verification phase")),
-    code_review: (lines, t) => lines.push(t.fg("accent", "  -> Code review in progress")),
-    failed: (lines, t) => {
+    PLANNING: (lines, _plan, t) => {
+        lines.push(t.fg("text", "  -> Building plan..."));
+    },
+    COMPLETED: (lines, _plan, t) => {
+        lines.push(t.fg("accent", "  -> All tasks completed. Orchestration finished."));
+    },
+    FAILED: (lines, _plan, t) => {
         lines.push(t.fg("error", "  -> Plan failed"));
         lines.push(t.fg("dim", "  Use /om-resume to recover or /om-enable"));
     }
@@ -255,8 +220,6 @@ function appendPhaseDetailMessages(
 ): void {
     if (phaseLabel && PHASE_DETAIL_RENDERERS[phaseLabel]) {
         PHASE_DETAIL_RENDERERS[phaseLabel](lines, plan, theme);
-    } else if (!phaseLabel && PLAN_STATUS_DETAIL_RENDERERS[plan.status]) {
-        PLAN_STATUS_DETAIL_RENDERERS[plan.status](lines, theme);
     }
 }
 
@@ -286,7 +249,7 @@ function buildPlanDisplay(
 
     // Header with status and goal
     const phaseLabel = computeExecutionPhaseLabel(p);
-    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel, p.status);
+    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {
         lines.push(`Goal: ${p.goal}`);
@@ -477,7 +440,7 @@ function buildTaskListView(
 
     // --- Header (label + goal + progress bar + phase detail messages) ---
     const phaseLabel = computeExecutionPhaseLabel(p);
-    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel, p.status);
+    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {
         lines.push(truncateToWidth(`Goal: ${p.goal}`, width));
