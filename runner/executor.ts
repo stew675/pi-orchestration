@@ -57,10 +57,6 @@ export async function executeTask(
         planTask.startedAt = Date.now();
         currentPlan.currentTaskId = task.id;
 
-        // Ensure we're in implementing state
-        if (!transitionTo("implementing", currentPlan)) {
-            notifyTuiOnly(OrchestratorState.pi || (await import("../core")).getPi(), "Failed to transition to implementing state when starting task");
-        }
         savePlanSafely(currentPlan);
 
         // Inform user via UI

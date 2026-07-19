@@ -217,16 +217,13 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
     t.result = { ...(t.result || {}), summary: summaryText };
 
-    // Transition to implementing or verifying state based on task completion
+    // Transition to verifying state if all tasks are completed
     const currentState = getCurrentOrchestrationState(p);
     const allCompleted = p.tasks.every((t) => t.status === "completed");
     if (allCompleted && currentState === "implementing") {
         if (!transitionTo("verifying", p)) {
             notifyTuiOnly(OrchestratorState.pi, "Failed to transition to verifying state after all tasks completed");
         }
-    } else if (currentState === "implementing" || currentState === "resuming") {
-        // Keep in implementing if there are still tasks to complete
-        transitionTo("implementing", p);
     }
 
     savePlanSafely(p);
