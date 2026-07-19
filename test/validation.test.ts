@@ -343,7 +343,7 @@ describe("healDependenciesOnDelete", () => {
         ]);
 
         healDependenciesOnDelete(plan.tasks, "A", []);
-        
+
         const taskB = plan.tasks.find(t => t.id === "B");
         expect(taskB).toBeDefined();
         expect(taskB!.dependencies).toEqual(["X"]);

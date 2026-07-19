@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as capture from "./capture";
 import { tryParseSubAgentEvent, getEventToolName, getEventParams } from "../core/types";
+import { OrchestratorState } from "../core";
+import { notifyTuiOnly } from "../runner/utils";
 
 /** Maximum number of raw output lines kept per process for diagnostics. */
 const MAX_CAPTURED_LINES = 2000;
@@ -28,9 +30,7 @@ export function killAllProcesses(signal: "SIGTERM" | "SIGKILL" = "SIGKILL"): voi
             child.kill(signal);
         } catch (err) {
             const childInfo = activeProcesses.get(child);
-            console.warn(
-                `Failed to kill process '${childInfo?.label ?? "unknown"}': ${err instanceof Error ? err.message : String(err)}`
-            );
+            notifyTuiOnly(OrchestratorState.pi, `Failed to kill process '${childInfo?.label ?? "unknown"}': ${err instanceof Error ? err.message : String(err)}`);
         }
     }
     activeProcesses.clear();
@@ -99,7 +99,7 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
     const rawStderrLines: string[] = [];
     child.stderr.on("data", (data) => {
         const str = data.toString();
-        console.error(`[${label}] ${str.trim()}`);
+        notifyTuiOnly(OrchestratorState.pi, `[${label}] ${str.trim()}`);
 
         const lines = str.split("\n");
         for (const line of lines) {
@@ -153,7 +153,7 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
             const permanentPath = path.join(logDir, `${taskId}.log`);
             fs.writeFileSync(permanentPath, content, "utf-8");
         } catch (e) {
-            console.warn(`Failed to write log for ${taskId}:`, e);
+            notifyTuiOnly(OrchestratorState.pi, `Failed to write log for ${taskId}: ${String(e)}`);
         }
     };
 
@@ -177,7 +177,7 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
     if (timeoutMs) {
         timeoutId = setTimeout(() => {
             if (!child.killed) {
-                console.warn(`[${label}] Timeout after ${timeoutMs}ms, killing process`);
+                notifyTuiOnly(OrchestratorState.pi, `[${label}] Timeout after ${timeoutMs}ms, killing process`);
                 child.kill("SIGTERM");
                 graceId = setTimeout(() => {
                     if (!child.killed) {

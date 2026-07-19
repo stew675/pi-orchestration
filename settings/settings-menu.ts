@@ -14,6 +14,7 @@ import { persistSettings, resetToDefaults } from "./settings";
 import { createModelPicker } from "../ui/model-picker";
 import { parseTimeout, formatTimeout } from "./time-utils";
 import { getKeybindings } from "@earendil-works/pi-tui";
+import { notifyTuiOnly } from "../runner/utils";
 
 /** Mapping of model scope identifiers to their OrchestratorState property keys and display labels. */
 const MODEL_SCOPES: Record<
@@ -350,7 +351,7 @@ async function handleModelSelection(
             ctx.ui.notify(`${label} set to ${selected.provider}/${selected.id}.`, "info");
         }
     } catch (err) {
-        console.error("Model picker error:", err);
+        notifyTuiOnly(OrchestratorState.pi, "Model picker error: " + String(err));
         ctx.ui.notify(`Error opening model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
 }
@@ -455,7 +456,7 @@ async function handleReviewerModelSelection(
             ctx.ui.notify(`Plan review model set to ${selected.provider}/${selected.id}.`, "info");
         }
     } catch (err) {
-        console.error("Reviewer model picker error:", err);
+        notifyTuiOnly(OrchestratorState.pi, "Reviewer model picker error: " + String(err));
         ctx.ui.notify(`Error opening reviewer model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
 }
@@ -760,7 +761,7 @@ async function handleCodeReviewModelSelection(
             ctx.ui.notify(`Code review model set to ${selected.provider}/${selected.id}.`, "info");
         }
     } catch (err) {
-        console.error("Code reviewer model picker error:", err);
+        notifyTuiOnly(OrchestratorState.pi, "Code reviewer model picker error: " + String(err));
         ctx.ui.notify(`Error opening code reviewer model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
 }

@@ -5,7 +5,7 @@ import { activeProcesses } from "./process/process-manager";
 export { activeProcesses };
 
 // Re-export shared utilities used by external callers (tools.ts)
-export { notifyOrchestrator } from "./runner/utils";
+export { notifyOrchestrator, notifyTuiOnly } from "./runner/utils";
 
 // ---------------------------------------------------------------------------
 // Thin facade - preserves the exact same public API for external callers.

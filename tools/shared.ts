@@ -1,5 +1,6 @@
 import { StateManager } from "../context/state-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
+import { getCurrentOrchestrationState } from "../core/state-machine";
 import {
     detectCycle,
     detectFileConflicts,
@@ -163,13 +164,17 @@ export function requireExecutionMode() {
 export function requirePlanNotExecuting() {
     const plan = StateManager.loadPlan();
     if (!plan) throw new Error("No plan exists.");
+    
+    // Get current state from state machine
+    const currentState = getCurrentOrchestrationState(plan);
+    
     // Block task modification during active execution - orchestrator must call
-    // orchestrate_replan first to shift into recovery mode (status: "planning").
-    // Allowed in: "planning" (recovery), "paused", "reviewing" (final verification), "reviewing_code".
-    const allowedStatuses = new Set(["planning", "paused", "reviewing", "reviewing_code"]);
-    if (!allowedStatuses.has(plan.status)) {
+    // orchestrate_replan first to shift into recovery mode (planning state).
+    // Allowed in: planning, paused, verifying, code_review, reviewing, reviewed.
+    const allowedStates: OrchestrationState[] = ["planning", "paused", "verifying", "code_review", "reviewing", "reviewed"];
+    if (!allowedStates.includes(currentState)) {
         throw new Error(
-            `Blocked during active execution (${plan.status}). Call orchestrate_replan first to enter recovery mode.`
+            `Blocked during active execution (${currentState}). Call orchestrate_replan first to enter recovery mode.`
         );
     }
 }
@@ -192,10 +197,17 @@ export function isBuildTask(description: string): boolean {
 // ---------------------------------------------------------------------------
 
 /** Combined prerequisite check for task CRUD tools: isActive + exec mode + plan not executing. */
+/** Combined prerequisite check for task CRUD tools: isActive + exec mode + setup/replanning gating. */
 export function requireTaskCrudPrereqs() {
     if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
     requireExecutionMode();
-    requirePlanNotExecuting();
+    
+    const state = OrchestratorState.currentState;
+    if (state !== "setup" && state !== "replanning") {
+        throw new Error(
+            `Blocked: task modification (add, edit, delete, complete) is only allowed during 'setup' or 'replanning' states. Current state is '${state}'.`
+        );
+    }
 }
 
 /** Send a silent guidance message to the orchestrator (model sees it, user doesn't). */

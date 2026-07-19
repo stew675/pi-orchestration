@@ -6,10 +6,10 @@ import {
     DEFAULT_VALIDATOR_TIMEOUT_MS,
     DEFAULT_SUMMARY_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
-    DEFAULT_SUB_AGENT_MAX_TURNS,
-    EXECUTION_PHASE_STATUSES
+    DEFAULT_SUB_AGENT_MAX_TURNS
 } from "./types";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
+import { getCurrentOrchestrationState, type OrchestrationState } from "./state-machine";
 
 /**
  * Central orchestrator state singleton.
@@ -21,11 +21,32 @@ import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools
  * Direct property reads are acceptable for guards (e.g., `if (!OrchestratorState.isActive)`).
  */
 export const OrchestratorState = {
-    isActive: false,
+    currentState: "inactive" as OrchestrationState,
+    get isActive(): boolean {
+        return this.currentState !== "inactive";
+    },
+    get isExecuting(): boolean {
+        return (
+            this.currentState === "setup" ||
+            this.currentState === "replanning" ||
+            this.currentState === "implementing" ||
+            this.currentState === "pausing" ||
+            this.currentState === "paused" ||
+            this.currentState === "resuming" ||
+            this.currentState === "failed" ||
+            this.currentState === "verifying" ||
+            this.currentState === "code_review"
+        );
+    },
+    get planningMode(): boolean {
+        return (
+            this.currentState === "planning" ||
+            this.currentState === "reviewing" ||
+            this.currentState === "reviewed"
+        );
+    },
     pi: undefined as ExtensionAPI | undefined,
     theme: null as Theme | null,
-    isExecuting: false,
-    planningMode: false,
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
     summaryModel: null as ModelRef | null,
@@ -57,7 +78,7 @@ export const OrchestratorState = {
     _preWriteHintSent: false,
     /** One-shot flag: true while the reviewer model is active during plan review cycle. */
     _inReviewPhase: false,
-    /** Flag indicating that the planner is currently incorporating feedback from a recent review. 
+    /** Flag indicating that the planner is currently incorporating feedback from a recent review.
      *  While true, updates to the plan will not trigger a new automatic review cycle. */
     _incorporatingFeedback: false,
     /** One-shot flag: reviewer is scheduled to start on agent_settled. */
@@ -91,36 +112,31 @@ OrchestratorState.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
 
 /**
  * Transition the orchestrator into a specific mode.
- * Sets all three boolean flags atomically, updates active tools,
+ * Sets the current state, updates active tools,
  * and calls an optional callback (e.g. TUI border refresh).
  *
- * @param isActive  - Is orchestration mode enabled at all?
- * @param isExecuting - Is the main execution loop running?
- * @param planningMode - Is the user actively building/editing a plan?
+ * @param state     - The target OrchestrationState
  * @param pi        - ExtensionAPI (for tool updates)
  * @param onMode    - Optional callback invoked with the resolved mode string
  */
 export function setOrchestrationMode(
-    isActive: boolean,
-    isExecuting: boolean,
-    planningMode: boolean,
+    state: OrchestrationState,
     pi: ExtensionAPI,
     onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void
 ) {
-    OrchestratorState.isActive = isActive;
-    OrchestratorState.isExecuting = isExecuting;
-    OrchestratorState.planningMode = planningMode;
+    OrchestratorState.currentState = state;
 
     updateActiveTools(pi);
 
     // Derive canonical mode label for callbacks (TUI border, etc.)
-    const mode: "inactive" | "planning" | "executing" | "idle" = !isActive
-        ? "inactive"
-        : planningMode
-          ? "planning"
-          : isExecuting
-            ? "executing"
-            : "idle";
+    const mode: "inactive" | "planning" | "executing" | "idle" =
+        state === "inactive"
+            ? "inactive"
+            : OrchestratorState.planningMode
+              ? "planning"
+              : OrchestratorState.isExecuting
+                ? "executing"
+                : "idle";
 
     onMode?.(mode);
 }
@@ -152,9 +168,7 @@ export function requireActive(ctx: {
 
 /** Default values for all OrchestratorState properties. */
 const STATE_DEFAULTS = {
-    isActive: false,
-    isExecuting: false,
-    planningMode: false,
+    currentState: "inactive" as OrchestrationState,
     theme: null as Theme | null,
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
@@ -233,7 +247,10 @@ export async function switchToOrchestrationModel(
 
     const targetModel = ctx.modelRegistry.find(orchModel.provider, orchModel.id);
     if (!targetModel) {
-        console.warn(`Orchestration model ${orchModel.provider}/${orchModel.id} not found in registry.`);
+        const pi = OrchestratorState.pi;
+        if (pi) {
+            try { pi.appendEntry("orchestration-status", { title: "Orchestration model not found", message: `Orchestration model ${orchModel.provider}/${orchModel.id} not found in registry.`, timestamp: Date.now() }); } catch {}
+        }
         return false;
     }
 
@@ -241,7 +258,10 @@ export async function switchToOrchestrationModel(
     if (success) {
         return true;
     }
-    console.warn(`No API key available for orchestration model ${orchModel.provider}/${orchModel.id}.`);
+    const pi2 = OrchestratorState.pi;
+    if (pi2) {
+        try { pi2.appendEntry("orchestration-status", { title: "No API key for orchestration model", message: `No API key available for orchestration model ${orchModel.provider}/${orchModel.id}.`, timestamp: Date.now() }); } catch {}
+    }
     return false;
 }
 
@@ -258,7 +278,8 @@ export async function restoreMainModel(
 
     const targetModel = ctx.modelRegistry.find(original.provider, original.id);
     if (!targetModel) {
-        console.warn(`Original model ${original.provider}/${original.id} not found in registry.`);
+        const p = OrchestratorState.pi;
+        if (p) { try { p.appendEntry("orchestration-status", { title: "Original model not found", message: `Original model ${original.provider}/${original.id} not found in registry.`, timestamp: Date.now() }); } catch {} }
         return false;
     }
 
@@ -267,7 +288,8 @@ export async function restoreMainModel(
     if (success) {
         return true;
     }
-    console.warn(`No API key available for original model ${original.provider}/${original.id}.`);
+    const p2 = OrchestratorState.pi;
+    if (p2) { try { p2.appendEntry("orchestration-status", { title: "No API key for original model", message: `No API key available for original model ${original.provider}/${original.id}.`, timestamp: Date.now() }); } catch {} }
     return false;
 }
 
@@ -294,7 +316,8 @@ export async function enterPlanningMode(
 
     const targetModel = ctx.modelRegistry.find(planningModel.provider, planningModel.id);
     if (!targetModel) {
-        console.warn(`Planning model ${planningModel.provider}/${planningModel.id} not found in registry.`);
+        const p = OrchestratorState.pi;
+        if (p) { try { p.appendEntry("orchestration-status", { title: "Planning model not found", message: `Planning model ${planningModel.provider}/${planningModel.id} not found in registry.`, timestamp: Date.now() }); } catch {} }
         return;
     }
 
@@ -302,7 +325,8 @@ export async function enterPlanningMode(
     if (success) {
         ctx.ui?.notify?.(`Switched to planning model: ${planningModel.provider}/${planningModel.id}`, "info");
     } else {
-        console.warn(`No API key available for planning model ${planningModel.provider}/${planningModel.id}.`);
+        const _p1 = OrchestratorState.pi;
+        if (_p1) { try { _p1.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for planning model ${planningModel.provider}/${planningModel.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot switch to planning model ${planningModel.provider}/${planningModel.id} - no configured API key.`,
             "warning"
@@ -326,7 +350,8 @@ export async function exitPlanningMode(
 
     const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
     if (!targetModel) {
-        console.warn(`Pre-planning model ${pre.provider}/${pre.id} not found in registry.`);
+        const _p2 = OrchestratorState.pi;
+        if (_p2) { try { _p2.appendEntry("orchestration-status", { title: "Orchestration status", message: `Pre-planning model ${pre.provider}/${pre.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
         OrchestratorState.prePlanningModel = undefined;
         return;
     }
@@ -335,7 +360,8 @@ export async function exitPlanningMode(
     if (success) {
         ctx.ui?.notify?.("Restored pre-planning model.", "info");
     } else {
-        console.warn(`No API key available for pre-planning model ${pre.provider}/${pre.id}.`);
+        const _p3 = OrchestratorState.pi;
+        if (_p3) { try { _p3.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for pre-planning model ${pre.provider}/${pre.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot restore pre-planning model ${pre.provider}/${pre.id} - no configured API key.`,
             "warning"
@@ -363,7 +389,8 @@ export async function switchToReviewerModel(
 
     const targetModel = ctx.modelRegistry.find(reviewerModel.provider, reviewerModel.id);
     if (!targetModel) {
-        console.warn(`Reviewer model ${reviewerModel.provider}/${reviewerModel.id} not found in registry.`);
+        const _p4 = OrchestratorState.pi;
+        if (_p4) { try { _p4.appendEntry("orchestration-status", { title: "Orchestration status", message: `Reviewer model ${reviewerModel.provider}/${reviewerModel.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
         return false;
     }
 
@@ -371,7 +398,8 @@ export async function switchToReviewerModel(
     if (success) {
         ctx.ui?.notify?.(`Switched to reviewer model: ${reviewerModel.provider}/${reviewerModel.id}`, "info");
     } else {
-        console.warn(`No API key available for reviewer model ${reviewerModel.provider}/${reviewerModel.id}.`);
+        const _p5 = OrchestratorState.pi;
+        if (_p5) { try { _p5.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for reviewer model ${reviewerModel.provider}/${reviewerModel.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot switch to reviewer model ${reviewerModel.provider}/${reviewerModel.id} - no configured API key.`,
             "warning"
@@ -396,7 +424,8 @@ export async function restoreFromReviewPhase(
 
     const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
     if (!targetModel) {
-        console.warn(`Pre-review model ${pre.provider}/${pre.id} not found in registry.`);
+        const _p6 = OrchestratorState.pi;
+        if (_p6) { try { _p6.appendEntry("orchestration-status", { title: "Orchestration status", message: `Pre-review model ${pre.provider}/${pre.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
         OrchestratorState.preReviewModel = undefined;
         return;
     }
@@ -405,7 +434,8 @@ export async function restoreFromReviewPhase(
     if (success) {
         ctx.ui?.notify?.("Restored pre-review model.", "info");
     } else {
-        console.warn(`No API key available for pre-review model ${pre.provider}/${pre.id}.`);
+        const _p7 = OrchestratorState.pi;
+        if (_p7) { try { _p7.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for pre-review model ${pre.provider}/${pre.id}.`, timestamp: Date.now() }); } catch {} };
         ctx.ui?.notify?.(
             `Cannot restore pre-review model ${pre.provider}/${pre.id} - no configured API key.`,
             "warning"
@@ -573,62 +603,36 @@ export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
 }
 
 /** Granular execution phase labels for the TUI status display. */
-export type ExecutionPhaseLabel = "PLANNING" | "EXECUTION" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "IDLE" | "REVIEWING";
+export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "REVIEWING" | "COMPLETED" | "FAILED";
 
 /**
  * Compute a granular execution phase label for display.
+ * Uses the state machine to derive the current state from OrchestratorState.
  * Returns null when not in an execution-like state (planning mode or inactive).
  */
 export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPhaseLabel | null {
-    // Single-pass count of task states
-    let activeCount = 0,
-        pendingCount = 0,
-        failedCount = 0,
-        clarifyingCount = 0;
-    for (const t of plan.tasks || []) {
-        if (EXECUTION_PHASE_STATUSES.includes(t.status as any)) activeCount++;
-        else if (t.status === "pending") pendingCount++;
-        else if (t.status === "failed") failedCount++;
-        else if (t.status === "awaiting_clarification") clarifyingCount++;
-    }
+    // Get canonical state from state machine
+    const state = getCurrentOrchestrationState(plan);
 
-    // Priority-ordered lookup: first matching condition wins
-    const priorityChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
-        { check: () => plan.status === "reviewing_code", label: "REVIEWING" },
-        { check: () => plan.status === "reviewing", label: "VERIFYING" },
-        { check: () => OrchestratorState._pauseReason === "stop" && plan.status === "paused", label: "STOPPED" },
-        {
-            check: () =>
-                OrchestratorState._pauseReason === "pause" && (plan.status === "paused" || plan.status === "pausing"),
-            label: "PAUSED"
-        },
-        { check: () => plan.status === "paused", label: "REPLANNING" },
-        { check: () => plan.status === "pausing", label: "PAUSED" }
-    ];
+    // Map state to phase label
+    const stateToPhase: Record<OrchestrationState, ExecutionPhaseLabel | null> = {
+        inactive: null,
+        planning: "PLANNING",
+        reviewing: "REVIEWING",
+        reviewed: "PLANNING",
+        setup: "SETUP",
+        implementing: "IMPLEMENTING",
+        replanning: "REPLANNING",
+        pausing: "PAUSED",
+        paused: "PAUSED",
+        resuming: "IMPLEMENTING",
+        failed: "FAILED",
+        completed: "COMPLETED",
+        verifying: "VERIFYING",
+        code_review: "REVIEWING",
+    };
 
-    for (const { check, label } of priorityChecks) {
-        if (check()) return label;
-    }
-
-    // Executing states - distinguish sub-phases
-    if (plan.status === "executing") {
-        const executionChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
-            { check: () => activeCount > 0, label: "EXECUTION" },
-            { check: () => clarifyingCount > 0, label: "REPLANNING" },
-            { check: () => failedCount > 0, label: "REPLANNING" },
-            { check: () => pendingCount > 0, label: "PLANNING" }
-        ];
-
-        for (const { check, label } of executionChecks) {
-            if (check()) return label;
-        }
-
-        // Nothing at all happening → IDLE fallback
-        return "IDLE";
-    }
-
-    // Planning mode or other states - handled by existing logic in ui.ts
-    return null;
+    return stateToPhase[state] ?? null;
 }
 
 /** Strip the `task_` prefix for display (label already says "Task:"). */

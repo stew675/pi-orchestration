@@ -4,8 +4,31 @@ import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { OrchestrationPlan, TaskType, ALL_TASK_STATUSES } from "../core/types";
+import { getCurrentOrchestrationState, type OrchestrationState } from "../core/state-machine";
+import { OrchestratorState } from "../core";
 
 const ORCHESTRATION_BASE = path.join(process.cwd(), CONFIG_DIR_NAME, "orchestration");
+
+/** Map orchestration state to plan.json status field. */
+function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["status"] {
+    const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
+        inactive: "planning",
+        planning: "planning",
+        reviewing: "planning",
+        reviewed: "planning",
+        setup: "setup",
+        implementing: "implementing",
+        replanning: "replanning",
+        pausing: "pausing",
+        paused: "paused",
+        resuming: "implementing",
+        failed: "failed",
+        completed: "completed",
+        verifying: "verifying",
+        code_review: "code_review",
+    };
+    return mapping[state];
+}
 
 /** Build a path under `.pi/orchestration/`. Optional `subDir` and `fileName` are appended. */
 function getOrchestrationPath(subDir?: string, fileName?: string): string {
@@ -83,13 +106,23 @@ export function drainPlanChangeListeners(): void {
     planChangeListeners = [];
 }
 
+/** Fire TUI-only notification (non-fatal, uses OrchestratorState.pi). */
+function notifyTui(msg: string): void {
+    const pi = OrchestratorState.pi;
+    if (pi) {
+        try {
+            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
+        } catch { /* non-fatal */ }
+    }
+}
+
 /** Fire UI listeners without invalidating the in-memory cache. Used by savePlan() - we already have the plan in memory, no need to re-read disk. */
 function notifyPlanChange(): void {
     for (const listener of planChangeListeners) {
         try {
             listener();
         } catch (e) {
-            console.error("Plan change listener error:", e);
+            notifyTui("Plan change listener error: " + String(e));
         }
     }
 }
@@ -160,7 +193,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     const plan = obj as Record<string, unknown>;
     if (typeof plan.goal !== "string") return false;
 
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
+    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review", "setup", "replanning"];
     if (!validStatuses.includes(plan.status as string)) return false;
 
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
@@ -198,7 +231,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
  * After repairs, re-validates the full plan via `isValidOrchestrationPlan`. Returns a valid
  * OrchestrationPlan if recovery succeeds, or null if the damage is too deep.
  *
- * All repairs are logged via console.warn so they surface in the TUI.
+ * All repairs are logged via TUI notification so they surface in the status view.
  */
 function recoverPlan(obj: unknown): OrchestrationPlan | null {
     if (!obj || typeof obj !== "object") return null;
@@ -206,20 +239,20 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
 
     // Plan-level fields must be intact - we can't recover a missing goal or bad status.
     if (typeof plan.goal !== "string") {
-        console.warn("Plan recovery failed: missing or invalid 'goal' field");
+        notifyTui("Plan recovery failed: missing or invalid 'goal' field");
         return null;
     }
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
+    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review", "setup", "replanning"];
     if (!validStatuses.includes(plan.status as string)) {
-        console.warn(`Plan recovery failed: invalid status ${JSON.stringify(plan.status)}`);
+        notifyTui(`Plan recovery failed: invalid status ${JSON.stringify(plan.status)}`);
         return null;
     }
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") {
-        console.warn("Plan recovery failed: invalid currentTaskId");
+        notifyTui("Plan recovery failed: invalid currentTaskId");
         return null;
     }
     if (!Array.isArray(plan.tasks)) {
-        console.warn("Plan recovery failed: tasks is not an array");
+        notifyTui("Plan recovery failed: tasks is not an array");
         return null;
     }
 
@@ -286,9 +319,9 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     // Final validation - if it passes, we have a recovered plan.
     if (isValidOrchestrationPlan(repaired)) {
         for (const w of warnings) {
-            console.warn(`Plan recovery: ${w}`);
+            notifyTui(`Plan recovery: ${w}`);
         }
-        console.warn(
+        notifyTui(
             `Plan recovered with repairs (${repaired.tasks.length} tasks retained). ` +
                 `The plan will be re-saved to persist the fixes.`
         );
@@ -296,7 +329,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     }
 
     // Recovery failed - log what we had and give up.
-    console.warn(
+    notifyTui(
         `Plan recovery failed after repairs (${warnings.length} issue(s) addressed, still invalid). ` +
             `The plan file may need manual intervention.`
     );
@@ -315,7 +348,7 @@ export function safeWriteFile(targetPath: string, content: string): void {
         try {
             fs.copyFileSync(targetPath, oldPath);
         } catch (copyErr) {
-            console.warn(`Failed to create backup copy for ${targetPath}:`, copyErr);
+            notifyTui(`Failed to create backup copy for ${targetPath}:` + String(copyErr));
         }
 
         // Only attempt fsync if the copy succeeded and the file exists.
@@ -324,10 +357,7 @@ export function safeWriteFile(targetPath: string, content: string): void {
             try {
                 fs.fsyncSync(fdOld);
             } catch (fsyncErr) {
-                console.warn(
-                    `Backup fsync failed for ${oldPath} - new write will proceed without synced backup:`,
-                    fsyncErr
-                );
+                notifyTui(`Backup fsync failed for ${oldPath} - new write will proceed without synced backup: ${String(fsyncErr)}`);
             } finally {
                 fs.closeSync(fdOld);
             }
@@ -405,15 +435,29 @@ export class StateManager {
                     return recovered;
                 }
 
-                console.error(`Loaded ${filePath} is structurally invalid`);
+                notifyTui(`Loaded ${filePath} is structurally invalid`);
             } catch (e) {
-                console.error(`Failed to parse ${filePath}`, e);
+                notifyTui(`Failed to parse ${filePath}: ${String(e)}`);
             }
             return null;
         }
 
         const primary = tryLoad(planPath);
         if (primary) {
+            // Ensure plan status is consistent with current orchestration state
+            const currentState = getCurrentOrchestrationState(primary);
+            if (currentState !== "inactive") {
+                const expectedStatus = mapStateToPlanStatus(currentState);
+                if (primary.status !== expectedStatus) {
+                    notifyTui(`[state-manager] Plan status mismatch: '${primary.status}' vs expected '${expectedStatus}'. Correcting.`);
+                    primary.status = expectedStatus;
+                    try {
+                        safeWriteFile(getPlanJsonPath(), JSON.stringify(primary, null, 2));
+                    } catch (e) {
+                        notifyTui(`Failed to persist corrected plan status: ${String(e)}`);
+                    }
+                }
+            }
             cachedPlan = primary;
             return primary;
         }
@@ -423,7 +467,7 @@ export class StateManager {
         // Always attempt backup recovery, even if primary was deleted by the user.
         const backup = tryLoad(backupPath);
         if (backup) {
-            console.warn(`Recovered plan from backup: ${backupPath}`);
+            notifyTui(`Recovered plan from backup: ${backupPath}`);
             cachedPlan = backup;
             return backup;
         }
@@ -439,7 +483,7 @@ export class StateManager {
         }
         const legacyBkp = tryLoad(legacyBackup);
         if (legacyBkp) {
-            console.warn(`Recovered plan from legacy backup: ${legacyBackup}`);
+            notifyTui(`Recovered plan from legacy backup: ${legacyBackup}`);
             cachedPlan = legacyBkp;
             return legacyBkp;
         }
@@ -491,7 +535,7 @@ export class StateManager {
 
             notifyPlanChange();
         } catch (e) {
-            console.error("StateManager: Failed to save plan.json", e);
+            notifyTui("StateManager: Failed to save plan.json - " + String(e));
             throw new Error(`StateManager failed to persist plan state: ${(e as Error).message}`, { cause: e });
         }
     }
@@ -813,7 +857,7 @@ export class StateManager {
             try {
                 fs.unlinkSync(filePath);
             } catch (err) {
-                console.error(`Failed to delete code-review.md:`, err);
+                notifyTui(`Failed to delete code-review.md: ${String(err)}`);
             }
         }
     }

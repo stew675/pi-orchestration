@@ -7,6 +7,7 @@ import { spawnAgent } from "../process/process-manager";
 import { buildValidatorContext } from "../context/context-builder";
 import { parseValidateToolCall, VALIDATOR_TOOLS } from "../tools/validator-tools";
 import { formatTimeout } from "../settings/time-utils";
+import { notifyTuiOnly } from "./utils";
 
 // ---------------------------------------------------------------------------
 // Feedback message constants
@@ -78,7 +79,7 @@ export async function validateTask(
         if (finalResult.feedback !== FEEDBACK_TIMEOUT) {
             break;
         }
-        console.warn(`[validator] Attempt ${attempt + 1}/${maxAttempts}: no tool call, retrying...`);
+        notifyTuiOnly(OrchestratorState.pi, `[validator] Attempt ${attempt + 1}/${maxAttempts}: no tool call, retrying...`);
     }
 
     // Persist the final validation response for debugging

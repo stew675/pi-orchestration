@@ -126,7 +126,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         taskType: (params.taskType as TaskType) || undefined,
                         timeoutMs: effectiveTimeout
                     };
-                    
+
                     const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];
                     simulatedTasks.push(newTask);
 

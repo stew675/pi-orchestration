@@ -8,13 +8,14 @@ import { OrchestratorState, resolveTaskModelByComplexity, resolveValidatorModel,
 import { StateManager } from "../context/state-manager";
 import { buildTaskContext } from "../context/context-builder";
 import * as monitor from "../process/monitor";
-import { notifyOrchestrator, savePlanSafely } from "./utils";
+import { notifyOrchestrator, savePlanSafely, notifyTuiOnly } from "./utils";
 import { runSubAgent } from "./subagent-spawner";
 import type { SubAgentResult } from "./subagent-spawner";
 import { validateTask } from "./validator";
 import { completeTaskWithSummary } from "./summarizer";
 import { processTaskResult as postProcessTaskResult } from "./post-processor";
 import { formatTimeout } from "../settings/time-utils";
+import { transitionTo, getCurrentOrchestrationState } from "../core/state-machine";
 
 /**
  * Execute a single task. Returns true to continue the loop, false to stop.
@@ -42,8 +43,10 @@ export async function executeTask(
         const currentPlan = StateManager.loadPlan();
         if (!currentPlan) return false;
 
+        const currentState = getCurrentOrchestrationState(currentPlan);
+
         // Hard stop
-        if (currentPlan.status === "paused" || currentPlan.status === "failed") {
+        if (currentState === "paused" || currentState === "failed") {
             return false;
         }
 
@@ -53,6 +56,7 @@ export async function executeTask(
         planTask.status = "running";
         planTask.startedAt = Date.now();
         currentPlan.currentTaskId = task.id;
+
         savePlanSafely(currentPlan);
 
         // Inform user via UI
@@ -74,7 +78,7 @@ export async function executeTask(
         // Post-task processing
         return postProcessTaskResult(task, pi);
     } catch (e) {
-        console.error(`Error executing task ${task.id}:`, e);
+        notifyTuiOnly(pi || OrchestratorState.pi || (await import("../core")).getPi(), `Error executing task ${task.id}: ${String(e)}`);
 
         // Reset orphaned task status so scheduler can retry on next cycle.
         try {
@@ -86,11 +90,11 @@ export async function executeTask(
                     t.attempts++;
                     delete t.startedAt;
                     savePlanSafely(p);
-                    console.warn(`Task ${task.id} reset from 'running' to 'pending' after unexpected error.`);
+                    notifyTuiOnly(pi || OrchestratorState.pi, `Task ${task.id} reset from 'running' to 'pending' after unexpected error.`);
                 }
             }
         } catch (resetErr) {
-            console.error(`Failed to reset task ${task.id} status:`, resetErr);
+            notifyTuiOnly(pi || OrchestratorState.pi, `Failed to reset task ${task.id} status: ${String(resetErr)}`);
         }
 
         if (pi) {
@@ -211,7 +215,7 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
 
     if (isRecoverable && !isReadOnly) {
         // Auto-complete with validator note appended to summary
-        console.warn(`[validator ${t.id}] Recoverable failure - auto-completing. Feedback: ${feedback}`);
+        notifyTuiOnly(OrchestratorState.pi, `[validator ${t.id}] Recoverable failure - auto-completing. Feedback: ${feedback}`);
         t.validatorFeedback = `Validator noted: ${feedback} (auto-completed; sub-agent exited cleanly)`;
         await completeTaskWithSummary(t, resolveSummaryModel(model), fullTranscript);
     } else {
@@ -272,6 +276,9 @@ async function runTaskSubAgent(
         const allRelevantFiles = new Set([...(t.files || []), ...procResult.discoveredArtifacts]);
         t.result = { summary: t.result?.summary || "", artifacts: Array.from(allRelevantFiles) };
 
+        // Save plan before further processing
+        savePlanSafely(p);
+
         // Handle spawn error first
         if (procResult.spawnError) {
             t.status = "failed";
@@ -306,6 +313,11 @@ async function runTaskSubAgent(
             } else {
                 t.validatorFeedback = `Sub-agent timed out after ${task.timeoutMs ?? OrchestratorState.taskTimeoutMs}ms (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
             }
+
+            // Transition to failed state
+            if (!transitionTo("failed", p)) {
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after task kill");
+            }
             savePlanSafely(p);
             return;
         }
@@ -320,6 +332,11 @@ async function runTaskSubAgent(
                 feedback += `\n\n[Captured Events]:\n${output}`;
             }
             t.validatorFeedback = feedback;
+
+            // Transition to failed state
+            if (!transitionTo("failed", p)) {
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after non-zero exit");
+            }
             savePlanSafely(p);
             return;
         }

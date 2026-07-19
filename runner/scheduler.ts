@@ -5,6 +5,7 @@ import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
 import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
+import { getCurrentOrchestrationState, transitionTo } from "../core/state-machine";
 
 // ---------------------------------------------------------------------------
 // Scheduling lock - ensures only one scheduling decision runs at a time.
@@ -41,7 +42,7 @@ export async function runTasks(
         try {
             const plan = StateManager.loadPlan();
             if (!plan) {
-                console.error(`Runner: No plan found.`);
+                notifyTuiOnly(pi, "Runner: No plan found.");
                 notifyOrchestrator(
                     pi,
                     "System: plan.json is corrupted or unreadable. Execution stopped. Run /om-reset to start fresh."
@@ -49,13 +50,16 @@ export async function runTasks(
                 return;
             }
 
+            // Get current state from state machine
+            const currentState = getCurrentOrchestrationState(plan);
+
             // Hard stop for paused/failed plans
-            if (plan.status === "paused" || plan.status === "failed") {
+            if (currentState === "paused" || currentState === "failed") {
                 return;
             }
 
             // Block scheduling while orchestrator is replanning
-            if (plan.status === "planning") {
+            if (currentState === "planning") {
                 return;
             }
 
@@ -94,7 +98,10 @@ export async function runTasks(
 
                 const failedTasks = (plan.tasks || []).filter((t) => t.status === "failed");
                 if (failedTasks.length > 0) {
-                    plan.status = "paused";
+                    // Transition to paused state
+                    if (!transitionTo("paused", plan)) {
+                        notifyTuiOnly(pi, "Failed to transition to paused state due to failed tasks");
+                    }
                     savePlanSafely(plan);
                     // Include failed task's feedback so orchestrator has context for recovery
                     const failedDetails = failedTasks
@@ -115,7 +122,10 @@ export async function runTasks(
 
                 const allCompleted = (plan.tasks || []).every((t) => t.status === "completed");
                 if (!allCompleted) {
-                    plan.status = "paused";
+                    // Transition to paused state
+                    if (!transitionTo("paused", plan)) {
+                        notifyTuiOnly(pi, "Failed to transition to paused state due to stalled execution");
+                    }
                     savePlanSafely(plan);
                     notifyOrchestrator(
                         pi,
@@ -159,11 +169,11 @@ function spawnSiblingRunner(pi: ExtensionAPI, model?: ModelRef): void {
     import("../runner")
         .then(({ Runner }) => {
             Runner.runTasks(pi, model).catch((err: Error) => {
-                console.error("Sibling runner error:", err);
+                notifyTuiOnly(pi, "Sibling runner error: " + String(err));
             });
         })
         .catch((err: Error) => {
-            console.error("Failed to spawn sibling runner:", err);
+            notifyTuiOnly(pi, "Failed to spawn sibling runner: " + String(err));
         });
 }
 
@@ -182,7 +192,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
     if (finalPlan.tasks.every((t) => t.status === "completed")) {
         const codeReviewModel = OrchestratorState.codeReviewModel;
         if (codeReviewModel) {
-            finalPlan.status = "reviewing_code";
+            finalPlan.status = "code_review";
             savePlanSafely(finalPlan);
 
             // Delete old code-review.md if present
@@ -208,7 +218,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                     );
                 }
             } catch (err) {
-                console.error("Code review execution failed:", err);
+                notifyTuiOnly(pi, "Code review execution failed: " + String(err));
                 notifyOrchestrator(
                     pi,
                     `System: Code review sub-agent error (${err instanceof Error ? err.message : String(err)}). Proceeding to final review without code review.`,
@@ -236,14 +246,14 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             if (approved) {
                 notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
                 // Code review passed — proceed to final verification
-                updatedPlan.status = "reviewing";
+                updatedPlan.status = "verifying";
                 savePlanSafely(updatedPlan);
                 const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             } else if (rejected) {
                 notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
                 // Code review rejected — remain in reviewing_code and wake orchestrator for remediation
-                updatedPlan.status = "reviewing_code";
+                updatedPlan.status = "code_review";
                 savePlanSafely(updatedPlan);
 
                 const wakeMessage = [
@@ -260,13 +270,13 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 notifyOrchestrator(pi, wakeMessage, { tuiVisible: true });
             } else {
                 notifyTuiOnly(pi, "System: Code review sub-agent produced no verdict — proceeding to FINAL REVIEW.");
-                updatedPlan.status = "reviewing";
+                updatedPlan.status = "verifying";
                 savePlanSafely(updatedPlan);
                 const reviewMessage = buildFinalReviewMessage(updatedPlan);
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             }
         } else {
-            finalPlan.status = "reviewing";
+            finalPlan.status = "verifying";
             savePlanSafely(finalPlan);
 
             // Build a contextual wakeup message with task summaries so the orchestrator

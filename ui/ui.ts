@@ -10,6 +10,7 @@ import {
     stripTaskPrefix,
     truncateToSentence
 } from "../core";
+import { getCurrentOrchestrationState, type OrchestrationState } from "../core/state-machine";
 import {
     MONITOR_POLL_INTERVAL_MS,
     getActiveTaskInfo,
@@ -56,33 +57,21 @@ function recolorBorderChars(line: string, borderColor: (s: string) => string): s
     return out;
 }
 
-type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim" | "muted";
+type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim" | "muted" | "mdHeading" | "border" | "borderAccent";
 
-/** Resolve the semantic color for orchestration phase display. Uses computeExecutionPhaseLabel from core.ts to avoid duplicating status evaluation logic. */
+/** Resolve the semantic color for orchestration phase display. Uses state machine directly. */
 function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     if (!OrchestratorState.isActive || !OrchestratorState.theme) return null;
 
     const plan = StateManager.loadPlan();
     // No plan on disk yet - orchestration is active, so we're in the initial planning phase.
-    // Return amber (warning) to indicate "building a plan" state.
     if (!plan) {
-        return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "warning");
+        return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "mdHeading");
     }
 
-    const phaseLabel = computeExecutionPhaseLabel(plan);
-    let color: SemanticColor;
-
-    if (phaseLabel) {
-        // Use the shared PHASE_LABEL_COLORS lookup table - same one used by buildPlanDisplay / resolveStatusLabelAndColor.
-        color = PHASE_LABEL_COLORS[phaseLabel] ?? "text";
-    } else {
-        // Not in execution mode - fall back to plan status colors (planning, pausing, etc.)
-        if (OrchestratorState.planningMode) {
-            color = PLAN_STATUS_COLORS["planning"] ?? "warning";
-        } else {
-            color = PLAN_STATUS_COLORS[plan.status] ?? "accent";
-        }
-    }
+    // Get canonical state from state machine
+    const state = getCurrentOrchestrationState(plan);
+    const color: SemanticColor = STATE_COLORS[state] ?? "text";
 
     return OrchestratorState.theme.fg.bind(OrchestratorState.theme, color);
 }
@@ -142,36 +131,46 @@ interface PlanDisplayOptions {
     detailed?: boolean;
 }
 
-/** Lookup table mapping execution phase labels to semantic colors. */
-const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
-    EXECUTION: "success",
-    PLANNING: "warning",
-    REPLANNING: "warning",
-    VERIFYING: "accent",
-    REVIEWING: "accent",
-    PAUSED: "warning",
-    STOPPED: "error",
-    IDLE: "dim"
+/** Lookup table mapping orchestration states to semantic colors. */
+const STATE_COLORS: Record<OrchestrationState, SemanticColor> = {
+    inactive: "text",
+    planning: "mdHeading",
+    reviewing: "borderAccent",
+    reviewed: "mdHeading",
+    setup: "warning",
+    implementing: "success",
+    replanning: "warning",
+    pausing: "warning",
+    paused: "warning",
+    resuming: "success",
+    failed: "error",
+    verifying: "accent",
+    completed: "border",
+    code_review: "borderAccent"
 };
 
-/** Lookup table mapping non-execution plan statuses to semantic colors. */
-const PLAN_STATUS_COLORS: Record<string, SemanticColor> = {
-    planning: "warning",
-    pausing: "warning",
-    failed: "error",
-    completed: "accent",
-    reviewing_code: "accent"
+/** Lookup table mapping execution phase labels to semantic colors (for backward compatibility). */
+const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
+    PLANNING: "mdHeading",
+    SETUP: "warning",
+    IMPLEMENTING: "success",
+    REPLANNING: "warning",
+    VERIFYING: "accent",
+    REVIEWING: "borderAccent",
+    PAUSED: "warning",
+    STOPPED: "error",
+    COMPLETED: "border",
+    FAILED: "error"
 };
 
 function resolveStatusLabelAndColor(
     phaseLabel: string | null | undefined,
-    planStatus: string
 ): { label: string; color: SemanticColor } {
     if (phaseLabel) {
         return { label: phaseLabel, color: PHASE_LABEL_COLORS[phaseLabel] ?? "text" };
     }
-    const fallback = PLAN_STATUS_COLORS[planStatus];
-    return { label: planStatus.toUpperCase(), color: fallback ?? "accent" };
+    // Fallback: should not normally happen now that computeExecutionPhaseLabel is exhaustive.
+    return { label: "COMPLETED", color: "accent" };
 }
 
 /** Strategy map for phase-detail message rendering. */
@@ -180,12 +179,16 @@ const PHASE_DETAIL_RENDERERS: Record<
     (lines: string[], plan: OrchestrationPlan, theme: { fg: (color: SemanticColor, text: string) => string }) => void
 > = {
     VERIFYING: (lines, _plan, t) => {
-        lines.push(t.fg("warning", "  -> Awaiting final review by orchestrator"));
+        lines.push(t.fg("warning", "  -> Awaiting final verification by orchestrator"));
         lines.push(t.fg("dim", "  Use /om-resume to wake the reviewer if nothing happens"));
     },
     REVIEWING: (lines, _plan, t) => {
-        lines.push(t.fg("warning", "  -> Automated code review complete or actions required"));
+        lines.push(t.fg("warning", "  -> Code review in progress or actions required"));
         lines.push(t.fg("dim", "  Read .pi/orchestration/plans/code-review.md for findings"));
+    },
+    SETUP: (lines, _plan, t) => {
+        lines.push(t.fg("warning", "  -> Setting up task execution environment"));
+        lines.push(t.fg("dim", "  Tasks are being prepared for implementation"));
     },
     REPLANNING: (lines, plan, t) => {
         const clarifyingTask = plan.tasks?.find((t2: Task) => t2.status === "awaiting_clarification");
@@ -217,22 +220,16 @@ const PHASE_DETAIL_RENDERERS: Record<
         lines.push(t.fg("error", "  -> Execution stopped by user (/om-stop)"));
         lines.push(t.fg("dim", "  Use /om-resume to continue or /om-reset to start fresh"));
     },
-    IDLE: (lines, _plan, t) => {
-        lines.push(t.fg("dim", "  -> Orchestrator idle"));
-    }
-};
-
-/** Lookup table mapping non-execution plan statuses to detail message renderers. */
-const PLAN_STATUS_DETAIL_RENDERERS: Record<
-    string,
-    (lines: string[], theme: { fg: (color: SemanticColor, text: string) => string }) => void
-> = {
-    pausing: (lines, t) => lines.push(t.fg("warning", "  -> Pausing gracefully (current task finishing...)")),
-    failed: (lines, t) => {
+    PLANNING: (lines, _plan, t) => {
+        lines.push(t.fg("text", "  -> Building plan..."));
+    },
+    COMPLETED: (lines, _plan, t) => {
+        lines.push(t.fg("accent", "  -> All tasks completed. Orchestration finished."));
+    },
+    FAILED: (lines, _plan, t) => {
         lines.push(t.fg("error", "  -> Plan failed"));
         lines.push(t.fg("dim", "  Use /om-resume to recover or /om-enable"));
-    },
-    planning: (lines, t) => lines.push(t.fg("text", "  -> Building plan..."))
+    }
 };
 
 function appendPhaseDetailMessages(
@@ -243,8 +240,6 @@ function appendPhaseDetailMessages(
 ): void {
     if (phaseLabel && PHASE_DETAIL_RENDERERS[phaseLabel]) {
         PHASE_DETAIL_RENDERERS[phaseLabel](lines, plan, theme);
-    } else if (!phaseLabel && PLAN_STATUS_DETAIL_RENDERERS[plan.status]) {
-        PLAN_STATUS_DETAIL_RENDERERS[plan.status](lines, theme);
     }
 }
 
@@ -274,7 +269,7 @@ function buildPlanDisplay(
 
     // Header with status and goal
     const phaseLabel = computeExecutionPhaseLabel(p);
-    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel, p.status);
+    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {
         lines.push(`Goal: ${p.goal}`);
@@ -465,7 +460,7 @@ function buildTaskListView(
 
     // --- Header (label + goal + progress bar + phase detail messages) ---
     const phaseLabel = computeExecutionPhaseLabel(p);
-    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel, p.status);
+    const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {
         lines.push(truncateToWidth(`Goal: ${p.goal}`, width));

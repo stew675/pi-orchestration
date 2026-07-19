@@ -2,7 +2,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Task } from "../core/types";
 import { MAX_CLARIFICATIONS } from "../core/types";
 import { StateManager } from "../context/state-manager";
-import { notifyOrchestrator, savePlanSafely } from "./utils";
+import { OrchestratorState } from "../core";
+import { notifyOrchestrator, savePlanSafely, notifyTuiOnly } from "./utils";
+import { transitionTo } from "../core/state-machine";
 
 // --- Contextual recovery guidance strategies ---
 const RECOVERY_STRATEGIES: Array<{
@@ -86,7 +88,10 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
 
         // Handle failure
         if (postTask?.status === "failed") {
-            postPlan.status = "paused";
+            // Transition to failed state
+            if (!transitionTo("failed", postPlan)) {
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state in post-processor");
+            }
             savePlanSafely(postPlan);
 
             const feedback = postTask.validatorFeedback || "";
@@ -101,14 +106,17 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
         // Check for graceful pause
         const afterTaskPlan = StateManager.loadPlan();
         if (afterTaskPlan?.status === "pausing") {
-            afterTaskPlan.status = "paused";
+            // Transition to paused state
+            if (!transitionTo("paused", afterTaskPlan)) {
+                notifyTuiOnly(OrchestratorState.pi, "Failed to transition to paused state in post-processor");
+            }
             savePlanSafely(afterTaskPlan);
             return notifyAndStop(pi, `System: Paused gracefully after task '${task.id}'.`);
         }
 
         return true;
     } catch (e) {
-        console.error(`Error in processTaskResult for task ${task.id}:`, e);
+        notifyTuiOnly(OrchestratorState.pi, `Error in processTaskResult for task ${task.id}: ${String(e)}`);
         if (pi) {
             notifyOrchestrator(
                 pi,
