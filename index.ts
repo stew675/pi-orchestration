@@ -195,7 +195,7 @@ export default function (pi: ExtensionAPI) {
 
             if (OrchestratorState.isExecuting) {
                 const plan = StateManager.loadPlan();
-                if (plan && plan.status === "reviewing_code") {
+                if (plan && plan.status === "code_review") {
                     return { systemPrompt: ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT };
                 }
                 return { systemPrompt: ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT };

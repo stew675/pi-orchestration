@@ -144,8 +144,9 @@ interface PlanDisplayOptions {
 
 /** Lookup table mapping execution phase labels to semantic colors. */
 const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
-    EXECUTION: "success",
     PLANNING: "warning",
+    SETUP: "warning",
+    IMPLEMENTING: "success",
     REPLANNING: "warning",
     VERIFYING: "accent",
     REVIEWING: "accent",
@@ -157,10 +158,14 @@ const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
 /** Lookup table mapping non-execution plan statuses to semantic colors. */
 const PLAN_STATUS_COLORS: Record<string, SemanticColor> = {
     planning: "warning",
+    implementing: "success",
     pausing: "warning",
-    failed: "error",
+    paused: "warning",
+    verifying: "accent",
+    reviewing: "accent",
+    code_review: "accent",
     completed: "accent",
-    reviewing_code: "accent"
+    failed: "error"
 };
 
 function resolveStatusLabelAndColor(
@@ -180,12 +185,16 @@ const PHASE_DETAIL_RENDERERS: Record<
     (lines: string[], plan: OrchestrationPlan, theme: { fg: (color: SemanticColor, text: string) => string }) => void
 > = {
     VERIFYING: (lines, _plan, t) => {
-        lines.push(t.fg("warning", "  -> Awaiting final review by orchestrator"));
+        lines.push(t.fg("warning", "  -> Awaiting final verification by orchestrator"));
         lines.push(t.fg("dim", "  Use /om-resume to wake the reviewer if nothing happens"));
     },
     REVIEWING: (lines, _plan, t) => {
-        lines.push(t.fg("warning", "  -> Automated code review complete or actions required"));
+        lines.push(t.fg("warning", "  -> Code review in progress or actions required"));
         lines.push(t.fg("dim", "  Read .pi/orchestration/plans/code-review.md for findings"));
+    },
+    SETUP: (lines, _plan, t) => {
+        lines.push(t.fg("warning", "  -> Setting up task execution environment"));
+        lines.push(t.fg("dim", "  Tasks are being prepared for implementation"));
     },
     REPLANNING: (lines, plan, t) => {
         const clarifyingTask = plan.tasks?.find((t2: Task) => t2.status === "awaiting_clarification");
@@ -227,12 +236,15 @@ const PLAN_STATUS_DETAIL_RENDERERS: Record<
     string,
     (lines: string[], theme: { fg: (color: SemanticColor, text: string) => string }) => void
 > = {
+    planning: (lines, t) => lines.push(t.fg("text", "  -> Building plan...")),
+    implementing: (lines, t) => lines.push(t.fg("warning", "  -> Preparing to implement tasks")),
     pausing: (lines, t) => lines.push(t.fg("warning", "  -> Pausing gracefully (current task finishing...)")),
+    verifying: (lines, t) => lines.push(t.fg("accent", "  -> Final verification phase")),
+    code_review: (lines, t) => lines.push(t.fg("accent", "  -> Code review in progress")),
     failed: (lines, t) => {
         lines.push(t.fg("error", "  -> Plan failed"));
         lines.push(t.fg("dim", "  Use /om-resume to recover or /om-enable"));
-    },
-    planning: (lines, t) => lines.push(t.fg("text", "  -> Building plan..."))
+    }
 };
 
 function appendPhaseDetailMessages(

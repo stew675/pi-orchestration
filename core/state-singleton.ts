@@ -573,7 +573,7 @@ export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
 }
 
 /** Granular execution phase labels for the TUI status display. */
-export type ExecutionPhaseLabel = "PLANNING" | "EXECUTION" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "IDLE" | "REVIEWING";
+export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "REVIEWING" | "IDLE";
 
 /**
  * Compute a granular execution phase label for display.
@@ -594,8 +594,8 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
 
     // Priority-ordered lookup: first matching condition wins
     const priorityChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
-        { check: () => plan.status === "reviewing_code", label: "REVIEWING" },
-        { check: () => plan.status === "reviewing", label: "VERIFYING" },
+        { check: () => plan.status === "code_review", label: "REVIEWING" },
+        { check: () => plan.status === "verifying", label: "VERIFYING" },
         { check: () => OrchestratorState._pauseReason === "stop" && plan.status === "paused", label: "STOPPED" },
         {
             check: () =>
@@ -611,12 +611,12 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
     }
 
     // Executing states - distinguish sub-phases
-    if (plan.status === "executing") {
+    if (plan.status === "implementing") {
         const executionChecks: Array<{ check: () => boolean; label: ExecutionPhaseLabel }> = [
-            { check: () => activeCount > 0, label: "EXECUTION" },
+            { check: () => activeCount > 0, label: "IMPLEMENTING" },
             { check: () => clarifyingCount > 0, label: "REPLANNING" },
             { check: () => failedCount > 0, label: "REPLANNING" },
-            { check: () => pendingCount > 0, label: "PLANNING" }
+            { check: () => pendingCount > 0 && activeCount === 0, label: "SETUP" }
         ];
 
         for (const { check, label } of executionChecks) {

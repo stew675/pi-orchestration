@@ -128,8 +128,8 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 );
             }
 
-            // Set current task and start executing
-            plan.status = "executing";
+            // Set current task and start implementing
+            plan.status = "implementing";
             plan.currentTaskId = task.id;
             StateManager.savePlan(plan);
 

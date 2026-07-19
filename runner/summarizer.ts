@@ -173,7 +173,7 @@ async function runTaskSummaryAsync(
 /** Wake the runner so it can schedule the next ready task after an async summary completes. */
 function resumeRunnerAfterSummary(): void {
     const p = StateManager.loadPlan();
-    if (p?.status === "executing" && OrchestratorState.summarizationConcurrency > 0) {
+    if (p?.status === "implementing" && OrchestratorState.summarizationConcurrency > 0) {
         try {
             const pi = getPi();
             import("../runner").then(({ Runner }) => {

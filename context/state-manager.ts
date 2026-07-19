@@ -160,7 +160,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     const plan = obj as Record<string, unknown>;
     if (typeof plan.goal !== "string") return false;
 
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
+    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review"];
     if (!validStatuses.includes(plan.status as string)) return false;
 
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
@@ -209,7 +209,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
         console.warn("Plan recovery failed: missing or invalid 'goal' field");
         return null;
     }
-    const validStatuses = ["planning", "executing", "pausing", "paused", "reviewing", "completed", "failed", "reviewing_code"];
+    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review"];
     if (!validStatuses.includes(plan.status as string)) {
         console.warn(`Plan recovery failed: invalid status ${JSON.stringify(plan.status)}`);
         return null;

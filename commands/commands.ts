@@ -104,7 +104,7 @@ function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
     );
 
     // Set status back so the runner can pick up the code-review flow via finishPlan
-    plan.status = "executing";
+    plan.status = "implementing";
     StateManager.savePlan(plan);
     Runner.runTasks(pi).catch((err: Error) => {
         console.error("Code review resume error:", err);
@@ -124,12 +124,12 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
     const next = findNextTaskToRun(plan);
     if (!next) {
         if (OrchestratorState.codeReviewModel) {
-            plan.status = "executing";
+            plan.status = "implementing";
             StateManager.savePlan(plan);
             Runner.runTasks(pi);
             return;
         }
-        plan.status = "reviewing";
+        plan.status = "verifying";
         StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
             plan,
@@ -147,7 +147,7 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
         return;
     }
 
-    plan.status = "executing";
+    plan.status = "implementing";
     plan.currentTaskId = next.id;
     StateManager.savePlan(plan);
     sendResumeMessage(
@@ -457,7 +457,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         );
     } else {
         // Pre-initialize the plan with status "planning" so the orchestrator
-        // can call orchestrate_add_task. Status transitions to "executing"
+        // can call orchestrate_add_task. Status transitions to "implementing"
         // when the first task is started via orchestrate_start_task.
         const goal = extractGoalFromMarkdown(implPlan);
         const newPlan = {
@@ -587,7 +587,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             // --- Toggle ON (enter planning mode) ---
             // Guard: cannot enter planning while execution is active
             const plan = StateManager.loadPlan();
-            if (OrchestratorState.isExecuting && plan && ["executing", "paused", "pausing"].includes(plan.status)) {
+            if (OrchestratorState.isExecuting && plan && ["implementing", "paused", "pausing"].includes(plan.status)) {
                 ctx.ui.notify(
                     "Cannot enter planning mode while orchestration is running.\nUse /om-pause or /om-stop first.",
                     "warning"
@@ -640,7 +640,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             OrchestratorState._manualPause = true;
             OrchestratorState._pauseReason = "pause";
             const plan = StateManager.loadPlan();
-            if (plan && plan.status === "executing") {
+            if (plan && plan.status === "implementing") {
                 // Graceful pause: set status to 'pausing' so the Runner finishes
                 // the current task before stopping. No processes are killed.
                 plan.status = "pausing";

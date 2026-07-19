@@ -29,3 +29,6 @@ did-not-ask
 
 # Test Results
 test_results.txt
+
+# Plans and prompts
+plans/

@@ -7,8 +7,8 @@ import { refreshBorder } from "../ui/ui";
 import { resetLoopState } from "../process/loop-detector";
 import { buildFinalReviewMessage, notifyOrchestrator } from "../runner/utils";
 
-/** Plan status that permits goal approval. */
-const REVIEW_STATUS = "reviewing";
+/** Plan status that permits goal approval (verification phase). */
+const REVIEW_STATUS = "verifying";
 
 /** Register review-phase tools (approve_goal). */
 export function registerReviewTools(pi: ExtensionAPI) {
@@ -31,7 +31,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (plan.status === "reviewing_code") {
+            if (plan.status === "code_review") {
                 throw new Error(
                     "orchestrate_approve_goal may not be used when in the REVIEWING phase. " +
                     "To exit the REVIEWING phase, you must either use orchestrate_complete_review, " +
@@ -39,12 +39,12 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 );
             }
 
-            // Only allow approval during the review phase - prevents premature approval
+            // Only allow approval during the verification phase - prevents premature approval
             if (plan.status !== REVIEW_STATUS) {
                 throw new Error(
                     `Cannot approve: plan is in '${plan.status}' status. ` +
-                        "orchestrate_approve_goal can only be called when the plan is in 'reviewing' status " +
-                        "(after all tasks have completed and the system has entered review mode)."
+                        "orchestrate_approve_goal can only be called when the plan is in 'verifying' status " +
+                        "(after all tasks have completed and the system has entered verification mode)."
                 );
             }
 
@@ -81,7 +81,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (plan.status !== "reviewing_code") {
+            if (plan.status !== "code_review") {
                 return {
                     content: [
                         {
@@ -94,7 +94,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             }
 
             // Transition to the VERIFYING phase
-            plan.status = "reviewing";
+            plan.status = "verifying";
             StateManager.savePlan(plan);
 
             // Wake up the orchestrator model and enter final review
