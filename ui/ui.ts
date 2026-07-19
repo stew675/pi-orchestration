@@ -135,11 +135,11 @@ const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
     SETUP: "warning",
     IMPLEMENTING: "success",
     REPLANNING: "warning",
-    VERIFYING: "border",
+    VERIFYING: "accent",
     REVIEWING: "borderAccent",
     PAUSED: "warning",
     STOPPED: "error",
-    COMPLETED: "accent",
+    COMPLETED: "border",
     FAILED: "error"
 };
 
