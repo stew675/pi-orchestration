@@ -79,19 +79,24 @@ function notifyTui(msg: string): void {
  * Returns true if transition was successful, false if invalid.
  * Updates OrchestratorState.currentState and maps plan.status to match.
  */
-export function transitionTo(newState: OrchestrationState, plan: OrchestrationPlan): boolean {
+export function transitionTo(newState: OrchestrationState, plan?: OrchestrationPlan, force = false): boolean {
   const currentState = OrchestratorState.currentState;
 
-  if (!STATE_TRANSITIONS[currentState].includes(newState)) {
+  if (!force && !STATE_TRANSITIONS[currentState].includes(newState)) {
     notifyTui(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
     return false;
   }
+
+  // Uncomment the following line to see all state transitions in the TUI
+  // notifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
 
   // Update OrchestratorState.currentState directly as the single source of truth
   OrchestratorState.currentState = newState;
 
   // Update plan status to match as a projection of currentState
-  plan.status = mapStateToPlanStatus(newState);
+  if (plan) {
+    plan.status = mapStateToPlanStatus(newState);
+  }
 
   return true;
 }
@@ -154,4 +159,28 @@ export function mapPlanStatusToState(status: OrchestrationPlan["status"]): Orche
  */
 export function getValidTransitionsFrom(state: OrchestrationState): Array<OrchestrationState> {
   return STATE_TRANSITIONS[state] || [];
+}
+
+// ---------------------------------------------------------------------------
+// State predicates — pure functions derived from the canonical state enum.
+// Replace all usage of OrchestratorState.isActive / .planningMode / .isExecuting.
+// ---------------------------------------------------------------------------
+
+/** Orchestrator has been activated (any state other than inactive). */
+export function isActive(state: OrchestrationState): boolean {
+  return state !== "inactive";
+}
+
+/** Orchestrator is in a planning-phase state (building or reviewing the plan). */
+export function isPlanningMode(state: OrchestrationState): boolean {
+  return state === "planning" || state === "reviewing" || state === "reviewed";
+}
+
+/** Orchestrator is in an execution-phase state (any active implementation lifecycle state). */
+export function isExecutingMode(state: OrchestrationState): boolean {
+  const executingStates: OrchestrationState[] = [
+    "setup", "replanning", "implementing", "pausing", "paused",
+    "resuming", "failed", "verifying", "code_review"
+  ];
+  return executingStates.includes(state);
 }

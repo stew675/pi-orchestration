@@ -10,7 +10,7 @@ import {
     stripTaskPrefix,
     truncateToSentence
 } from "../core";
-import { getCurrentOrchestrationState, type OrchestrationState } from "../core/state-machine";
+import { getCurrentOrchestrationState, isActive as stateIsActive, type OrchestrationState } from "../core/state-machine";
 import {
     MONITOR_POLL_INTERVAL_MS,
     getActiveTaskInfo,
@@ -61,7 +61,7 @@ type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim"
 
 /** Resolve the semantic color for orchestration phase display. Uses state machine directly. */
 function getOrchestrationPhaseColor(): ((s: string) => string) | null {
-    if (!OrchestratorState.isActive || !OrchestratorState.theme) return null;
+    if (!stateIsActive(OrchestratorState.currentState) || !OrchestratorState.theme) return null;
 
     const plan = StateManager.loadPlan();
     // No plan on disk yet - orchestration is active, so we're in the initial planning phase.
@@ -773,7 +773,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
     pi.on("turn_end", async (_event, ctx: ExtensionContext) => {
         widgetCtx = ctx;
         // Refresh widget and status line after the turn completes (agent has processed).
-        if (!OrchestratorState.isActive) {
+        if (!stateIsActive(OrchestratorState.currentState)) {
             clearUI(ctx);
             return;
         }
@@ -787,7 +787,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
     // Register plan change listener and track cleanup handle
     planChangeListenerCleanup = onPlanChange(() => {
         if (!widgetCtx) return;
-        if (!OrchestratorState.isActive) {
+        if (!stateIsActive(OrchestratorState.currentState)) {
             clearUI(widgetCtx);
             return;
         }
@@ -824,7 +824,7 @@ export function clearUI(ctx: ExtensionContext) {
 }
 
 function updateWidget(ctx: ExtensionContext) {
-    if (!OrchestratorState.isActive) {
+    if (!stateIsActive(OrchestratorState.currentState)) {
         ctx.ui.setWidget("orchestrator-status", undefined);
         return;
     }

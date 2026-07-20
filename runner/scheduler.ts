@@ -192,7 +192,9 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
     if (finalPlan.tasks.every((t) => t.status === "completed")) {
         const codeReviewModel = OrchestratorState.codeReviewModel;
         if (codeReviewModel) {
-            finalPlan.status = "code_review";
+            if (!transitionTo("code_review", finalPlan)) {
+                notifyTuiOnly(pi, "Failed to transition to code_review state");
+            }
             savePlanSafely(finalPlan);
 
             // Delete old code-review.md if present
@@ -246,14 +248,18 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             if (approved) {
                 notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
                 // Code review passed — proceed to final verification
-                updatedPlan.status = "verifying";
+                if (!transitionTo("verifying", updatedPlan)) {
+                    notifyTuiOnly(pi, "Failed to transition to verifying state");
+                }
                 savePlanSafely(updatedPlan);
                 const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             } else if (rejected) {
                 notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
-                // Code review rejected — remain in reviewing_code and wake orchestrator for remediation
-                updatedPlan.status = "code_review";
+                // Code review rejected — remain in code_review and wake orchestrator for remediation
+                if (!transitionTo("code_review", updatedPlan)) {
+                    notifyTuiOnly(pi, "Failed to transition to code_review state");
+                }
                 savePlanSafely(updatedPlan);
 
                 const wakeMessage = [
@@ -270,13 +276,17 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 notifyOrchestrator(pi, wakeMessage, { tuiVisible: true });
             } else {
                 notifyTuiOnly(pi, "System: Code review sub-agent produced no verdict — proceeding to FINAL REVIEW.");
-                updatedPlan.status = "verifying";
+                if (!transitionTo("verifying", updatedPlan)) {
+                    notifyTuiOnly(pi, "Failed to transition to verifying state");
+                }
                 savePlanSafely(updatedPlan);
                 const reviewMessage = buildFinalReviewMessage(updatedPlan);
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             }
         } else {
-            finalPlan.status = "verifying";
+            if (!transitionTo("verifying", finalPlan)) {
+                notifyTuiOnly(pi, "Failed to transition to verifying state");
+            }
             savePlanSafely(finalPlan);
 
             // Build a contextual wakeup message with task summaries so the orchestrator

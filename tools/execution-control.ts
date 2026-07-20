@@ -4,6 +4,7 @@ import { StateManager } from "../context/state-manager";
 import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
+import { isActive as stateIsActive, isExecutingMode } from "../core/state-machine";
 import { detectFileConflicts, formatFileConflictError } from "../validation/validation";
 import type { Task } from "../core/types";
 import { ACTIVE_TASK_STATUSES } from "../core/types";
@@ -28,7 +29,7 @@ export function registerExecutionControlTools(pi: ExtensionAPI) {
         parameters: Type.Object({}),
         executionMode: "sequential",
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
             const plan = StateManager.loadPlan();
             if (!plan) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
@@ -91,8 +92,8 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         }),
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
-            if (!OrchestratorState.isExecuting) {
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
+            if (!isExecutingMode(OrchestratorState.currentState)) {
                 throw new Error(
                     "Execution has not been approved yet. Ask the user to run /om-accept before calling orchestrate_start_task."
                 );
@@ -169,7 +170,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         ],
         parameters: Type.Object({}),
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             const plan = StateManager.loadPlan();
             if (!plan) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
@@ -200,7 +201,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         }),
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
@@ -233,8 +234,8 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         }),
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
-            if (!OrchestratorState.isExecuting) {
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
+            if (!isExecutingMode(OrchestratorState.currentState)) {
                 throw new Error(
                     "Execution has not been approved yet. " + "Ask the user to run /om-accept before resuming."
                 );
@@ -301,7 +302,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         parameters: Type.Object({}),
         executionMode: "sequential",
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
             // When stop is disabled by the user, return a nudge instead of halting.
             if (!OrchestratorState.allowStopTool) {

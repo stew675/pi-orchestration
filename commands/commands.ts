@@ -16,6 +16,7 @@ import {
     enterPlanningMode,
     exitPlanningMode
 } from "../core";
+import { isActive as stateIsActive, isPlanningMode, isExecutingMode } from "../core/state-machine";
 import { showOrchestratorStatus, setOrchestrationEditor, clearUI, refreshBorder } from "../ui/ui";
 import { openSettingsMenu } from "../settings/settings-menu";
 import { AcceptOrEditDialog } from "../ui/accept-or-edit-dialog";
@@ -265,7 +266,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
     if (resume) {
         // Resume the existing plan
         await enterOrchestrationMode(pi, ctx);
-        setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder);
+        setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
         OrchestratorState.shouldResetContext = true;
         OrchestratorState._manualPause = false;
         OrchestratorState._pauseReason = null;
@@ -351,7 +352,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
         description: "Toggle orchestration mode on/off",
         handler: async (_args, ctx) => {
             // --- Toggle OFF ---
-            if (OrchestratorState.isActive) {
+            if (stateIsActive(OrchestratorState.currentState)) {
                 const ok = await ctx.ui.confirm(
                     "Exit orchestration mode",
                     "Stop all running sub-agents and return to normal Pi mode?\nPlan will be preserved on disk for later resume."
@@ -460,11 +461,8 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
 
     const plan = StateManager.loadPlan();
     if (plan && plan.status !== "completed" && plan.tasks.length > 0) {
-        if (!transitionTo("setup", plan)) {
-            notifyTuiOnly(pi, "Failed to transition to setup state in startExecutionFromPlan");
-        }
+        setOrchestrationMode("setup", pi, refreshBorder, plan);
         StateManager.savePlan(plan);
-        setOrchestrationMode("setup", pi, refreshBorder);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
         ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
         pi.sendMessage(
@@ -476,16 +474,13 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             { triggerTurn: true }
         );
     } else {
-        setOrchestrationMode("setup", pi, refreshBorder);
-        // Pre-initialize the plan with status "setup" so the orchestrator
-        // can call orchestrate_add_task. Status transitions to "implementing"
-        // when the first task is started via orchestrate_start_task.
         const goal = extractGoalFromMarkdown(implPlan);
         const newPlan = {
             goal,
             status: "setup" as const,
             tasks: []
         };
+        setOrchestrationMode("setup", pi, refreshBorder, newPlan);
         StateManager.savePlan(newPlan);
 
         ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
@@ -592,7 +587,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (!requireActive(ctx)) return;
 
             // --- Toggle OFF (exit planning mode) ---
-            if (OrchestratorState.planningMode) {
+            if (isPlanningMode(OrchestratorState.currentState)) {
                 await exitPlanningMode(pi, ctx);
                 setOrchestrationMode("inactive", pi, refreshBorder);
                 ctx.ui.notify("Planning mode exited. Implementation plan preserved on disk.", "info");
@@ -602,7 +597,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             // --- Toggle ON (enter planning mode) ---
             // Guard: cannot enter planning while execution is active
             const plan = StateManager.loadPlan();
-            if (OrchestratorState.isExecuting && plan && ["implementing", "paused", "pausing"].includes(plan.status)) {
+            if (isExecutingMode(OrchestratorState.currentState) && plan && ["implementing", "paused", "pausing"].includes(plan.status)) {
                 ctx.ui.notify(
                     "Cannot enter planning mode while orchestration is running.\nUse /om-pause or /om-stop first.",
                     "warning"
@@ -711,7 +706,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             }
 
             await exitPlanningMode(pi, ctx);
-            setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder);
+            setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
 
             ctx.ui.notify(
                 recovered > 0

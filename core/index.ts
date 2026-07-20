@@ -56,3 +56,10 @@ export {
 } from "./state-singleton";
 
 export type { ExecutionPhaseLabel } from "./state-singleton";
+
+// ─── State Machine Predicates ───────────────────────────────────────
+export {
+    isActive,
+    isPlanningMode,
+    isExecutingMode
+} from "./state-machine";
