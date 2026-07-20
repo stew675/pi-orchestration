@@ -265,7 +265,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
     if (resume) {
         // Resume the existing plan
         await enterOrchestrationMode(pi, ctx);
-        setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder);
+        setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
         OrchestratorState.shouldResetContext = true;
         OrchestratorState._manualPause = false;
         OrchestratorState._pauseReason = null;
@@ -460,11 +460,8 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
 
     const plan = StateManager.loadPlan();
     if (plan && plan.status !== "completed" && plan.tasks.length > 0) {
-        if (!transitionTo("setup", plan)) {
-            notifyTuiOnly(pi, "Failed to transition to setup state in startExecutionFromPlan");
-        }
+        setOrchestrationMode("setup", pi, refreshBorder, plan);
         StateManager.savePlan(plan);
-        setOrchestrationMode("setup", pi, refreshBorder);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
         ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
         pi.sendMessage(
@@ -476,16 +473,13 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             { triggerTurn: true }
         );
     } else {
-        setOrchestrationMode("setup", pi, refreshBorder);
-        // Pre-initialize the plan with status "setup" so the orchestrator
-        // can call orchestrate_add_task. Status transitions to "implementing"
-        // when the first task is started via orchestrate_start_task.
         const goal = extractGoalFromMarkdown(implPlan);
         const newPlan = {
             goal,
             status: "setup" as const,
             tasks: []
         };
+        setOrchestrationMode("setup", pi, refreshBorder, newPlan);
         StateManager.savePlan(newPlan);
 
         ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
@@ -711,7 +705,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             }
 
             await exitPlanningMode(pi, ctx);
-            setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder);
+            setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
 
             ctx.ui.notify(
                 recovered > 0

@@ -49,18 +49,13 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 );
             }
 
-            // Transition to completed state via state machine
-            if (!transitionTo("completed", plan)) {
-                throw new Error("Failed to transition to completed state");
-            }
-            StateManager.savePlan(plan);
-
             // Clear all internal orchestrator state so a new goal starts fresh.
             resetLoopState();
             Runner.cancelAllSummaries();
 
-            // Transition out of execution mode so the TUI border reflects completion.
-            setOrchestrationMode("completed", getPi(), refreshBorder);
+            // Transition to completed state and out of execution mode via the state machine
+            setOrchestrationMode("completed", getPi(), refreshBorder, plan);
+            StateManager.savePlan(plan);
 
             return {
                 content: [

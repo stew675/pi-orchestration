@@ -9,7 +9,7 @@ import {
     DEFAULT_SUB_AGENT_MAX_TURNS
 } from "./types";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
-import { getCurrentOrchestrationState, type OrchestrationState } from "./state-machine";
+import { getCurrentOrchestrationState, transitionTo, type OrchestrationState } from "./state-machine";
 
 /**
  * Central orchestrator state singleton.
@@ -112,19 +112,22 @@ OrchestratorState.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
 
 /**
  * Transition the orchestrator into a specific mode.
- * Sets the current state, updates active tools,
+ * Sets the current state via transitionTo, updates active tools,
  * and calls an optional callback (e.g. TUI border refresh).
  *
  * @param state     - The target OrchestrationState
  * @param pi        - ExtensionAPI (for tool updates)
  * @param onMode    - Optional callback invoked with the resolved mode string
+ * @param plan      - Optional OrchestrationPlan to sync state to
  */
 export function setOrchestrationMode(
     state: OrchestrationState,
     pi: ExtensionAPI,
-    onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void
+    onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void,
+    plan?: OrchestrationPlan
 ) {
-    OrchestratorState.currentState = state;
+    // Delegate state transition and plan status sync to transitionTo
+    transitionTo(state, plan, true);
 
     updateActiveTools(pi);
 

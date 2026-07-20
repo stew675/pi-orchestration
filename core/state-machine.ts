@@ -79,19 +79,24 @@ function notifyTui(msg: string): void {
  * Returns true if transition was successful, false if invalid.
  * Updates OrchestratorState.currentState and maps plan.status to match.
  */
-export function transitionTo(newState: OrchestrationState, plan: OrchestrationPlan): boolean {
+export function transitionTo(newState: OrchestrationState, plan?: OrchestrationPlan, force = false): boolean {
   const currentState = OrchestratorState.currentState;
 
-  if (!STATE_TRANSITIONS[currentState].includes(newState)) {
+  if (!force && !STATE_TRANSITIONS[currentState].includes(newState)) {
     notifyTui(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
     return false;
   }
+
+  // Uncomment the following line to see all state transitions in the TUI
+  notifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
 
   // Update OrchestratorState.currentState directly as the single source of truth
   OrchestratorState.currentState = newState;
 
   // Update plan status to match as a projection of currentState
-  plan.status = mapStateToPlanStatus(newState);
+  if (plan) {
+    plan.status = mapStateToPlanStatus(newState);
+  }
 
   return true;
 }
