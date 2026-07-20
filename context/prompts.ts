@@ -36,12 +36,7 @@ System: Plan quality guidelines:
 - Refer to broad sections as **Phase** (not "Task" — tasks are created later by the execution orchestrator).
 - Each phase may consist of multiple unit tasks; describe enough detail for clean decomposition.`;
 
-/** Hint #2 — sent after every orchestrate_write_plan or orchestrate_edit_plan succeeds.
- *  Reinforces STOP behavior. */
-export const PLANNING_HINT_POST_WRITE = `
-System: Plan saved. The full plan has been displayed to the user from disk. Awaiting your review.`;
-
-/** Hint #3 — prepended to user edit feedback when the planner is asked to revise.
+/** Prepended to user edit feedback when the planner is asked to revise.
  *  Thoroughness reminder for edits. */
 export const PLANNING_HINT_EDIT = `
 System: Update the implementation plan based on this feedback. Be thorough — search and update ALL relevant sections within the plan to enact every change requested, not just one spot.`;

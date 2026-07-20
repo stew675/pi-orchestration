@@ -87,11 +87,6 @@ export const OrchestratorState = {
     shuttingDown: false
 };
 
-/** Global idle timeout for any sub-agent — no JSON stream activity (milliseconds; 0 = disabled). */
-OrchestratorState.subAgentIdleTimeoutMs = DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS;
-/** Global maximum model turns for any sub-agent (0 = unlimited). */
-OrchestratorState.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
-
 /**
  * Transition the orchestrator into a specific mode.
  * Sets the current state via transitionTo, updates active tools,
@@ -534,22 +529,6 @@ export function resolveSummaryModel(fallback?: { provider: string; id: string })
     if (OrchestratorState.summaryModel) return OrchestratorState.summaryModel;
     if (OrchestratorState.simpleTaskModel) return OrchestratorState.simpleTaskModel;
     return fallback;
-}
-
-/**
- * Resolve the effective model for plan-review agents.
- * Returns null if no reviewer model is configured (feature disabled).
- */
-export function resolveReviewerModel(): ModelRef | null {
-    return OrchestratorState.reviewerModel;
-}
-
-/**
- * Resolve the effective model for code-review agents.
- * Returns null if no code-review model is configured (feature disabled).
- */
-export function resolveCodeReviewModel(): ModelRef | null {
-    return OrchestratorState.codeReviewModel;
 }
 
 /**

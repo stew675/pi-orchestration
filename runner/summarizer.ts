@@ -142,7 +142,7 @@ export function resetSummarizer(): void {
     summaryWaitQueue.length = 0;
 }
 
-/** @internal Kept for future per-task summary cancellation. Currently unused - use {@link cancelAllSummaries} for shutdown. */
+/** Cancel a specific pending task summary (used by orchestrate_complete_task). */
 export function cancelTaskSummary(taskId: string): void {
     pendingSummaries.delete(taskId);
 }

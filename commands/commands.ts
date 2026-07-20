@@ -207,9 +207,7 @@ function resumePlanExecution(_stalePlan: unknown, pi: ExtensionAPI) {
         verifying: handleResumeReview,
         plan_review: handleResumeReview,
         code_review: handleResumeCodeReview,
-        reviewing_code: handleResumeCodeReview,
         implementing: handleResumeExecutingOrPaused,
-        executing: handleResumeExecutingOrPaused,
         paused: handleResumeExecutingOrPaused,
         planning: handleResumePlanning,
         failed: handleResumeFailed

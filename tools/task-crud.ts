@@ -15,8 +15,7 @@ import {
     requireTaskCrudPrereqs,
     sendSilentGuidance,
     validateAddTask,
-    validateEditTask,
-    validateDeleteTask
+    validateEditTask
 } from "./shared";
 
 /** Task ID naming convention prefix. */

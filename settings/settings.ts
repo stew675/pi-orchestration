@@ -301,5 +301,3 @@ export function persistSettings(state: Record<SettingKey, unknown>): void {
     saveProjectSettings(settings);
 }
 
-/** @deprecated Renamed to {@link persistSettings}. Will be removed in a future version. */
-export const persistModels = persistSettings;

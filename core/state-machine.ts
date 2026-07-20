@@ -158,13 +158,6 @@ export function mapPlanStatusToState(status: OrchestrationPlan["status"]): Orche
   }
 }
 
-/**
- * Get all valid transitions from a given state for documentation/debugging.
- */
-export function getValidTransitionsFrom(state: OrchestrationState): Array<OrchestrationState> {
-  return STATE_TRANSITIONS[state] || [];
-}
-
 // ---------------------------------------------------------------------------
 // State predicates — pure functions derived from the canonical state enum.
 // Replace all usage of OrchestratorState.isActive / .planningMode / .isExecuting.
