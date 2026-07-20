@@ -203,7 +203,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             // Empty dependencies check for non-read-only tasks
             const taskType = (params.taskType as TaskType) || "other";
             if (!params.dependencies || params.dependencies.length === 0) {
-                const isReadOnly = taskType === "reviewing" || taskType === "research";
+                const isReadOnly = isTaskReadOnly(taskType);
                 if (!isReadOnly && (params.files?.length ?? 0) > 0) {
                     warnings.push(
                         `Guidance: task '${params.id}' has no dependencies but modifies files. ` +

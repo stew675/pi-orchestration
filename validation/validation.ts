@@ -1,5 +1,65 @@
 import { OrchestrationPlan, Task, type TaskType, isTaskReadOnly } from "../core/types";
 
+// ---------------------------------------------------------------------------
+// Shared graph helpers (used by detectFileConflicts and autoHealFileConflicts)
+// ---------------------------------------------------------------------------
+
+/** Build a memoised ancestor map for all tasks. Returns { ancestors, tasksMap, isReadOnlyByTask }. */
+function buildGraphData(
+    tasks: Task[]
+): {
+    ancestors: Map<string, Set<string>>;
+    tasksMap: Map<string, Task>;
+    isReadOnlyByTask: Map<string, boolean>;
+} {
+    const ancestors = new Map<string, Set<string>>();
+    const tasksMap = new Map<string, Task>();
+    const isReadOnlyByTask = new Map<string, boolean>();
+
+    for (const t of tasks) {
+        tasksMap.set(t.id, t);
+        isReadOnlyByTask.set(t.id, isTaskReadOnly(t.taskType ?? ("other" as TaskType)));
+    }
+
+    function getAncestors(taskId: string): Set<string> {
+        if (ancestors.has(taskId)) return ancestors.get(taskId)!;
+        const set = new Set<string>();
+        const task = tasksMap.get(taskId);
+        if (task && task.dependencies) {
+            for (const depId of task.dependencies) {
+                set.add(depId);
+                for (const grandDep of getAncestors(depId)) {
+                    set.add(grandDep);
+                }
+            }
+        }
+        ancestors.set(taskId, set);
+        return set;
+    }
+
+    // Pre-compute all ancestor maps.
+    for (const t of tasks) {
+        getAncestors(t.id);
+    }
+
+    return { ancestors, tasksMap, isReadOnlyByTask };
+}
+
+/** Build a file-to-task-IDs map from the given tasks. */
+function buildFileToTasks(tasks: Task[]): Map<string, string[]> {
+    const fileToTasks = new Map<string, string[]>();
+    for (const t of tasks) {
+        if (!t.files) continue;
+        for (const file of t.files) {
+            if (!fileToTasks.has(file)) {
+                fileToTasks.set(file, []);
+            }
+            fileToTasks.get(file)!.push(t.id);
+        }
+    }
+    return fileToTasks;
+}
+
 /**
  * Detects circular dependencies in the task graph using DFS.
  * Returns the cycle path if found, otherwise null.
@@ -78,52 +138,13 @@ export function detectFileConflicts(
 
     // Pre-filter to active (non-archived) tasks
     const activeTasks = plan.tasks?.filter((t) => !isArchived(t.id)) || [];
-    const fileToTasks = new Map<string, Set<string>>();
 
-    // 1. Map every file to the tasks that modify it
-    for (const task of activeTasks) {
-        if (!task.files) continue;
-        for (const file of task.files) {
-            if (!fileToTasks.has(file)) {
-                fileToTasks.set(file, new Set());
-            }
-            fileToTasks.get(file)!.add(task.id);
-        }
-    }
+    const { ancestors, isReadOnlyByTask } = buildGraphData(activeTasks);
+    const fileToTasksMap = buildFileToTasks(activeTasks);
 
-    // Precompute all ancestors (transitively completed or not) for each task using BFS/DFS
-    const ancestors = new Map<string, Set<string>>();
-    const tasksMap = new Map<string, Task>();
-    const isReadOnlyByTask = new Map<string, boolean>();
-    for (const t of activeTasks) {
-        tasksMap.set(t.id, t);
-        isReadOnlyByTask.set(t.id, isTaskReadOnly(t.taskType ?? ("other" as TaskType)));
-    }
-
-    function getAncestors(taskId: string): Set<string> {
-        if (ancestors.has(taskId)) return ancestors.get(taskId)!;
-        const set = new Set<string>();
-        const task = tasksMap.get(taskId);
-        if (task && task.dependencies) {
-            for (const depId of task.dependencies) {
-                set.add(depId);
-                for (const grandDep of getAncestors(depId)) {
-                    set.add(grandDep);
-                }
-            }
-        }
-        ancestors.set(taskId, set);
-        return set;
-    }
-
-    for (const t of activeTasks) {
-        getAncestors(t.id);
-    }
-
-    // 2. For files touched by multiple tasks, check if there's a dependency path
+    // For files touched by multiple tasks, check if there's a dependency path
     const conflicts: Array<{ file: string; tasks: string[] }> = [];
-    for (const [file, tasks] of fileToTasks.entries()) {
-        const taskList = Array.from(tasks);
+    for (const [file, taskList] of fileToTasksMap.entries()) {
         if (hasPairwiseConflict(taskList, ancestors, isReadOnlyByTask)) {
             conflicts.push({ file, tasks: taskList });
         }
@@ -278,47 +299,10 @@ export function healDependenciesOnDelete(
  * and automatically injects dependency edges to heal the race condition (preserves order based on task array indices).
  */
 export function autoHealFileConflicts(tasks: Task[]): void {
-    const ancestors = new Map<string, Set<string>>();
-    const tasksMap = new Map<string, Task>();
-    const isReadOnlyByTask = new Map<string, boolean>();
+    const { ancestors, tasksMap, isReadOnlyByTask } = buildGraphData(tasks);
+    const fileToTasksMap = buildFileToTasks(tasks);
 
-    for (const t of tasks) {
-        tasksMap.set(t.id, t);
-        isReadOnlyByTask.set(t.id, isTaskReadOnly(t.taskType ?? "other"));
-    }
-
-    function getAncestors(taskId: string): Set<string> {
-        if (ancestors.has(taskId)) return ancestors.get(taskId)!;
-        const set = new Set<string>();
-        const task = tasksMap.get(taskId);
-        if (task && task.dependencies) {
-            for (const depId of task.dependencies) {
-                set.add(depId);
-                for (const grandDep of getAncestors(depId)) {
-                    set.add(grandDep);
-                }
-            }
-        }
-        ancestors.set(taskId, set);
-        return set;
-    }
-
-    for (const t of tasks) {
-        getAncestors(t.id);
-    }
-
-    const fileToTasks = new Map<string, string[]>();
-    for (const t of tasks) {
-        if (!t.files) continue;
-        for (const file of t.files) {
-            if (!fileToTasks.has(file)) {
-                fileToTasks.set(file, []);
-            }
-            fileToTasks.get(file)!.push(t.id);
-        }
-    }
-
-    for (const [file, fileTaskIds] of fileToTasks.entries()) {
+    for (const [file, fileTaskIds] of fileToTasksMap.entries()) {
         if (fileTaskIds.length < 2) continue;
 
         for (let i = 0; i < fileTaskIds.length; i++) {
@@ -340,13 +324,25 @@ export function autoHealFileConflicts(tasks: Task[]): void {
                             if (!taskB.dependencies.includes(a)) {
                                 taskB.dependencies.push(a);
                                 ancestors.delete(b);
-                                getAncestors(b);
+                                // Recompute ancestors for b after adding dependency
+                                const set = new Set<string>();
+                                for (const depId of taskB.dependencies) {
+                                    set.add(depId);
+                                    for (const grandDep of ancestors.get(depId) || []) set.add(grandDep);
+                                }
+                                ancestors.set(b, set);
                             }
                         } else {
                             if (!taskA.dependencies.includes(b)) {
                                 taskA.dependencies.push(b);
                                 ancestors.delete(a);
-                                getAncestors(a);
+                                // Recompute ancestors for a after adding dependency
+                                const set = new Set<string>();
+                                for (const depId of taskA.dependencies) {
+                                    set.add(depId);
+                                    for (const grandDep of ancestors.get(depId) || []) set.add(grandDep);
+                                }
+                                ancestors.set(a, set);
                             }
                         }
                     }

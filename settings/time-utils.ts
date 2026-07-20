@@ -47,3 +47,15 @@ export function formatTimeout(ms: number): string {
     if (minutes > 0) return `${minutes}m`;
     return `${seconds}s`;
 }
+
+/** Format milliseconds to a compact string suitable for input field defaults.
+ *  Returns "0" for no timeout (unlike formatTimeout which returns "no timeout"). */
+export function formatTimeoutCompact(ms: number): string {
+    if (ms === 0) return "0";
+    const totalSeconds = Math.floor(ms / 1_000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes > 0 && seconds > 0) return `${minutes}m${seconds}s`;
+    if (minutes > 0) return `${minutes}m`;
+    return `${seconds}s`;
+}

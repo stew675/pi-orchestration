@@ -12,6 +12,7 @@ export {
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_MAX_TURNS,
     isTaskReadOnly,
+    isToolCallEvent,
     tryParseSubAgentEvent,
     getEventToolName,
     getEventParams

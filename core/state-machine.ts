@@ -1,4 +1,4 @@
-import { OrchestratorState } from "./state-singleton";
+import { OrchestratorState, notifyTui as coreNotifyTui } from "./state-singleton";
 import type { OrchestrationPlan } from "./types";
 
 /**
@@ -67,15 +67,7 @@ export function getCurrentOrchestrationState(): OrchestrationState {
   return OrchestratorState.currentState;
 }
 
-/** Fire TUI-only notification (non-fatal). */
-function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
-        try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
-    }
-}
+
 
 /**
  * State transition function with validation.
@@ -86,12 +78,12 @@ export function transitionTo(newState: OrchestrationState, plan?: OrchestrationP
   const currentState = OrchestratorState.currentState;
 
   if (!force && !STATE_TRANSITIONS[currentState].includes(newState)) {
-    notifyTui(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
+    coreNotifyTui(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
     return false;
   }
 
   if (OrchestratorState.debugLogTransitions) {
-    notifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
+    coreNotifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
   }
 
   // Update OrchestratorState.currentState directly as the single source of truth

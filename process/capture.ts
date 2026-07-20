@@ -78,8 +78,9 @@ function formatLine(raw: string): string | null {
     }
 }
 
-/** Extract tool call names from an assistant message's content parts. */
-function extractToolCalls(message: unknown): string[] {
+/** Extract tool call names from an assistant message's content parts.
+ * @public - shared utility used by both capture formatting and sub-agent spawner. */
+export function extractToolCalls(message: unknown): string[] {
     if (!message || typeof message !== "object") return [];
     const content = (message as any).content;
     if (!Array.isArray(content)) return [];

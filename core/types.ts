@@ -104,6 +104,14 @@ export interface SubAgentEvent {
     error?: string;
 }
 
+/** Check if an event represents a tool call or execution start.
+ *
+ * Both legacy (`tool_call`) and streaming (`tool_execution_start`) formats are matched.
+ */
+export function isToolCallEvent(ev: SubAgentEvent): boolean {
+    return ev.type === "tool_call" || ev.type === "tool_execution_start";
+}
+
 /** Safely parse a raw JSON line into a SubAgentEvent. Returns null on failure. */
 export function tryParseSubAgentEvent(raw: string): SubAgentEvent | null {
     try {

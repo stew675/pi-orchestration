@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef } from "../core/types";
-import { tryParseSubAgentEvent, getEventToolName } from "../core/types";
+import { tryParseSubAgentEvent, getEventToolName, isToolCallEvent } from "../core/types";
 import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
 import * as monitor from "../process/monitor";
@@ -76,7 +76,7 @@ export async function runCodeReview(
                 const event = tryParseSubAgentEvent(line);
                 if (!event) return;
 
-                if (verdict === null && (event.type === "tool_call" || event.type === "tool_execution_start")) {
+                if (verdict === null && isToolCallEvent(event)) {
                     const toolName = getEventToolName(event);
                     if (toolName === CODE_REVIEW_APPROVE_TOOL) {
                         verdict = "approve";

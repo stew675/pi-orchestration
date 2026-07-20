@@ -1,5 +1,5 @@
 import type { ModelRef } from "../core/types";
-import { tryParseSubAgentEvent, SubAgentEvent, getEventToolName } from "../core/types";
+import { tryParseSubAgentEvent, getEventToolName, isToolCallEvent } from "../core/types";
 import { OrchestratorState } from "../core";
 import { StateManager } from "../context/state-manager";
 import * as monitor from "../process/monitor";
@@ -212,7 +212,4 @@ async function runValidatorOnce(
     });
 }
 
-/** Check if an event is a tool call / execution start. */
-function isToolCallEvent(ev: SubAgentEvent): boolean {
-    return ev.type === "tool_call" || ev.type === "tool_execution_start";
-}
+

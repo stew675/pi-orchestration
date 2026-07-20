@@ -219,8 +219,8 @@ function formatAndExtract(rawLine: string): string | null {
             const role = String(ev.message?.role ?? "");
             if (!["user", "assistant"].includes(role)) return null;
             const text = capture.extractText(ev.message);
-            // extractToolCalls is private in capture.ts - inline the small helper here
-            const toolCalls = extractToolCallNames(ev.message);
+            // Use shared extractToolCalls from capture.ts
+            const toolCalls = capture.extractToolCalls(ev.message);
             if (!text && toolCalls.length === 0) return null;
 
             let line = "";
@@ -260,15 +260,4 @@ function formatAndExtract(rawLine: string): string | null {
     }
 }
 
-/** Extract tool call names from an assistant message's content parts.
- * (Kept here because it's only needed by the process-manager wrapper.) */
-function extractToolCallNames(message: unknown): string[] {
-    if (!message || typeof message !== "object") return [];
-    const content = (message as any).content;
-    if (!Array.isArray(content)) return [];
-    const names: string[] = [];
-    for (const part of content) {
-        if (part?.type === "toolCall" && typeof part.toolName === "string") names.push(part.toolName);
-    }
-    return names;
-}
+
