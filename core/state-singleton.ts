@@ -45,6 +45,7 @@ export const OrchestratorState = {
     allowStopTool: true, // when false, orchestrate_stop returns a nudge instead of halting
     validateSimpleTasks: false, // validation for simple tasks (default off)
     validateComplexTasks: true, // validation for complex tasks (default on)
+    debugLogTransitions: false, // log state transitions to TUI notifications (default off)
 
     // --- Configurable timeouts (milliseconds; 0 = no timeout) ---
     taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS, // default watchdog for sub-agent tasks (12 min)
@@ -175,6 +176,7 @@ const STATE_DEFAULTS = {
     allowStopTool: true,
     validateSimpleTasks: false,
     validateComplexTasks: true,
+    debugLogTransitions: false,
     taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS,
     validatorTimeoutMs: DEFAULT_VALIDATOR_TIMEOUT_MS,
     taskSummaryTimeoutMs: DEFAULT_SUMMARY_TIMEOUT_MS,
@@ -712,12 +714,13 @@ export function setSubAgentMaxTurns(value: number): void {
 
 /** Toggle a boolean setting on OrchestratorState. */
 export function setBooleanSetting(
-    key: "allowStopTool" | "validateSimpleTasks" | "validateComplexTasks",
+    key: "allowStopTool" | "validateSimpleTasks" | "validateComplexTasks" | "debugLogTransitions",
     value: boolean
 ): void {
     if (key === "allowStopTool") OrchestratorState.allowStopTool = value;
     else if (key === "validateSimpleTasks") OrchestratorState.validateSimpleTasks = value;
-    else OrchestratorState.validateComplexTasks = value;
+    else if (key === "validateComplexTasks") OrchestratorState.validateComplexTasks = value;
+    else OrchestratorState.debugLogTransitions = value;
 }
 
 /** Set a model reference on OrchestratorState by key. Centralizes mutation of model config properties. */

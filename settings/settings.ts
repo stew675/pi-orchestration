@@ -45,7 +45,7 @@ const TIMEOUT_KEYS = ["taskTimeoutMs", "validatorTimeoutMs", "taskSummaryTimeout
 const LIMIT_KEYS = ["subAgentMaxTurns"] as const;
 
 /** Keys that hold boolean behaviour flags. */
-const BOOL_KEYS = ["allowStopTool", "validateSimpleTasks", "validateComplexTasks"] as const;
+const BOOL_KEYS = ["allowStopTool", "validateSimpleTasks", "validateComplexTasks", "debugLogTransitions"] as const;
 
 /** All configurable setting keys (union of the above groups). */
 type SettingKey =
@@ -78,6 +78,7 @@ interface OrchestrationSettings {
     allowStopTool?: boolean;
     validateSimpleTasks?: boolean;
     validateComplexTasks?: boolean;
+    debugLogTransitions?: boolean;
 }
 
 /** Path to project-local settings (checked first). */
@@ -227,6 +228,7 @@ export function resetToDefaults(state: Record<SettingKey, unknown>): Orchestrati
     state.allowStopTool = true;
     state.validateSimpleTasks = false;
     state.validateComplexTasks = true;
+    state.debugLogTransitions = false;
 
     return effective;
 }
@@ -287,7 +289,8 @@ export function persistSettings(state: Record<SettingKey, unknown>): void {
     const boolDefaults: Array<{ key: (typeof BOOL_KEYS)[number]; defaultValue: boolean }> = [
         { key: "allowStopTool", defaultValue: true },
         { key: "validateSimpleTasks", defaultValue: false },
-        { key: "validateComplexTasks", defaultValue: true }
+        { key: "validateComplexTasks", defaultValue: true },
+        { key: "debugLogTransitions", defaultValue: false }
     ];
     for (const { key, defaultValue } of boolDefaults) {
         const value = state[key] as boolean;

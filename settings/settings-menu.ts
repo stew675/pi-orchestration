@@ -79,7 +79,8 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 `  Sub-agent max turns:   ${OrchestratorState.subAgentMaxTurns}\n` +
                 `  Allow stop tool:       ${OrchestratorState.allowStopTool ? "enabled" : "disabled"}\n` +
                 `  Validate simple tasks: ${OrchestratorState.validateSimpleTasks ? "enabled" : "disabled"}\n` +
-                `  Validate complex tasks: ${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"}\n\n` +
+                `  Validate complex tasks: ${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"}\n` +
+                `  Debug transitions:     ${OrchestratorState.debugLogTransitions ? "enabled" : "disabled"}\n\n` +
                 `Use /om-settings in TUI mode for interactive configuration, or:\n` +
                 `  /om-settings orchestration <provider/model>\n` +
                 `  /om-settings planning <provider/model>\n` +
@@ -240,7 +241,8 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         return [
             { value: "allow-stop-tool", label: `Allow orchestrate_stop (${OrchestratorState.allowStopTool ? "enabled" : "disabled"})` },
             { value: "validate-simple-tasks", label: `Validate simple tasks (${OrchestratorState.validateSimpleTasks ? "enabled" : "disabled"})` },
-            { value: "validate-complex-tasks", label: `Validate complex tasks (${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"})` }
+            { value: "validate-complex-tasks", label: `Validate complex tasks (${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"})` },
+            { value: "debug-log-transitions", label: `Debug state transitions (${OrchestratorState.debugLogTransitions ? "enabled" : "disabled"})` }
         ];
     }
 
@@ -344,6 +346,14 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 () => OrchestratorState.validateComplexTasks,
                 (v) => setBooleanSetting("validateComplexTasks", v),
                 (v) => `Validation for complex tasks ${v ? "enabled" : "disabled"}.`
+            );
+        },
+        "debug-log-transitions": async () => {
+            toggleBooleanSetting(
+                ctx,
+                () => OrchestratorState.debugLogTransitions,
+                (v) => setBooleanSetting("debugLogTransitions", v),
+                (v) => `Debug state transition logging ${v ? "enabled" : "disabled"}.`
             );
         },
         "reset-defaults": async () => {
