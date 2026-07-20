@@ -2,7 +2,6 @@
 export {
     ALL_TASK_STATUSES,
     ACTIVE_TASK_STATUSES,
-    EXECUTION_PHASE_STATUSES,
     FULL_TOOLS,
     READ_ONLY_TOOLS,
     ARTIFACT_PRODUCING_TOOLS,
@@ -35,6 +34,7 @@ export {
     enterPlanningMode,
     exitPlanningMode,
     beginShutdown,
+    notifyTui,
     updateActiveTools,
     resolveTaskModelByComplexity,
     resolveValidatorModel,

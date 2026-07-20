@@ -108,7 +108,7 @@ export function transitionTo(newState: OrchestrationState, plan?: OrchestrationP
 /**
  * Map orchestration state to plan.json status field.
  */
-function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["status"] {
+export function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["status"] {
   const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
     inactive: "planning", // fallback
     planning: "planning",

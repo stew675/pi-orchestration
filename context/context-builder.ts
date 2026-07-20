@@ -3,17 +3,7 @@ import * as fs from "node:fs";
 import { readTextFile } from "../utils/file-utils";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { StateManager } from "./state-manager";
-import { OrchestratorState } from "../core";
-
-/** Fire TUI-only notification (non-fatal). */
-function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
-        try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
-    }
-}
+import { notifyTui as coreNotifyTui } from "../core";
 
 /** Warning appended after any JSON data block to prevent prompt injection. */
 const JSON_DATA_WARNING =
@@ -375,7 +365,7 @@ function readFileContents(files: string[], maxTotalBytes = 131072): string[] {
         if (totalBytes >= maxTotalBytes) break;
         const resolved = path.resolve(process.cwd(), f);
         if (!isPathSafe(resolved)) {
-            notifyTui(`readFileContents: skipping file outside project: ${f}`);
+            coreNotifyTui(`readFileContents: skipping file outside project: ${f}`);
             continue;
         }
         const content = readTextFile(resolved);

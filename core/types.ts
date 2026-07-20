@@ -56,7 +56,6 @@ export const ALL_TASK_STATUSES = [
     "failed"
 ] as const;
 export const ACTIVE_TASK_STATUSES = ["running", "validating", "summarizing", "awaiting_clarification"] as const;
-export const EXECUTION_PHASE_STATUSES = ["running", "validating", "summarizing"] as const;
 
 export interface Task {
     id: string; // e.g., "task_01"

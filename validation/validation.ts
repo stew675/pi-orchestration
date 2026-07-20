@@ -232,19 +232,6 @@ export function formatFileConflictError(
 }
 
 /**
- * Returns the IDs of tasks that directly depend on the given task ID.
- */
-export function getDependents(plan: OrchestrationPlan, taskId: string): string[] {
-    const dependents: string[] = [];
-    for (const t of plan.tasks || []) {
-        if (t.dependencies?.includes(taskId)) {
-            dependents.push(t.id);
-        }
-    }
-    return dependents;
-}
-
-/**
  * Heal dependencies of tasks when a task is deleted or replaced.
  * - If replacementTaskIds is specified: dependent tasks of deletedTaskId will depend on ALL replacementTaskIds.
  * - If replacementTaskIds is empty: dependent tasks of deletedTaskId will inherit deletedTaskId's dependencies.

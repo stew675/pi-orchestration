@@ -433,6 +433,21 @@ export function beginShutdown(): void {
 }
 
 /**
+ * Fire a TUI-only notification (non-fatal).
+ * Appends to the "orchestration-status" channel so it appears in the transcript
+ * without polluting LLM context. Uses `OrchestratorState.pi` internally.
+ * Safe to call before pi is initialised — silently no-ops if unavailable.
+ */
+export function notifyTui(msg: string): void {
+    const pi = OrchestratorState.pi;
+    if (pi) {
+        try {
+            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
+        } catch { /* non-fatal */ }
+    }
+}
+
+/**
  * Update the set of active tools based on current orchestration mode.
  *
  * - **Inactive** - hides all orchestration tools, keeps base tools

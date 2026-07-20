@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { safeWriteFile } from "../context/state-manager";
-import { OrchestratorState } from "../core";
+import { notifyTui as coreNotifyTui } from "../core";
 
 import {
     DEFAULT_TASK_TIMEOUT_MS,
@@ -12,16 +12,6 @@ import {
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_MAX_TURNS
 } from "../core/types";
-
-/** Fire TUI-only notification (non-fatal). */
-function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
-        try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
-    }
-}
 
 /** Keys that hold model references (nullable ModelRef). */
 const MODEL_KEYS = [
@@ -100,7 +90,7 @@ function loadFile(p: string): OrchestrationSettings {
         const data = fs.readFileSync(p, "utf-8");
         return JSON.parse(data) as OrchestrationSettings;
     } catch (e) {
-        notifyTui(`Failed to parse ${p}: ${String(e)}`);
+        coreNotifyTui(`Failed to parse ${p}: ${String(e)}`);
         return {};
     }
 }

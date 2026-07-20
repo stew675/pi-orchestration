@@ -5,7 +5,6 @@ import {
     detectFileConflicts,
     detectOversizedTasks,
     formatFileConflictError,
-    getDependents,
     healDependenciesOnDelete,
     autoHealFileConflicts
 } from "../validation/validation";
@@ -295,37 +294,6 @@ describe("formatFileConflictError", () => {
         const conflicts = [{ file: "x.ts", tasks: ["A"] }];
         const msg = formatFileConflictError(conflicts, "Custom error");
         expect(msg).toContain("Custom error");
-    });
-});
-
-// ---------------------------------------------------------------------------
-// getDependents
-// ---------------------------------------------------------------------------
-
-describe("getDependents", () => {
-    it("returns tasks that directly depend on the given task", () => {
-        const plan = makePlan([
-            { id: "A" },
-            { id: "B", dependencies: ["A"] },
-            { id: "C", dependencies: ["A"] },
-            { id: "D", dependencies: ["B"] } // transitive, not direct
-        ]);
-        expect(getDependents(plan, "A")).toEqual(["B", "C"]);
-    });
-
-    it("returns empty array when no dependents exist", () => {
-        const plan = makePlan([{ id: "A" }, { id: "B" }]);
-        expect(getDependents(plan, "A")).toEqual([]);
-    });
-
-    it("handles missing task ID gracefully", () => {
-        const plan = makePlan([{ id: "A" }]);
-        expect(getDependents(plan, "nonexistent")).toEqual([]);
-    });
-
-    it("returns empty array for empty plan", () => {
-        const plan = makePlan([]);
-        expect(getDependents(plan, "A")).toEqual([]);
     });
 });
 
