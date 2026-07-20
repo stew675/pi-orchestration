@@ -209,8 +209,8 @@ export interface ReadOnlyAgentOptions<T> {
 
 /** Result of a generic read-only sub-agent execution. */
 export type ReadOnlyAgentResult<T> =
-    | { resolved: true; value: T }
-    | { resolved: false; code: number | null; killedByWatchdog?: "idle_timeout" | "max_turns"; lastAssistantText?: string };
+    | { resolved: true; value: T; lastAssistantText?: string; code: number | null; killed: boolean }
+    | { resolved: false; code: number | null; killedByWatchdog?: "idle_timeout" | "max_turns"; lastAssistantText?: string; killed: boolean };
 
 /** Spawn a generic read-only sub-agent with standard monitoring and watchdog enforcement.
  *
@@ -224,7 +224,7 @@ export async function runReadOnlyAgent<T>(options: ReadOnlyAgentOptions<T>): Pro
 
     return await new Promise((resolve) => {
         let lastAssistantText: string | undefined;
-        let resolvedEarly = false;
+        let earlyResult: T | null = null;
 
         const { child, clearTimeout } = spawnAgent(
             args,
@@ -241,15 +241,9 @@ export async function runReadOnlyAgent<T>(options: ReadOnlyAgentOptions<T>): Pro
                 const event = tryParseSubAgentEvent(line);
                 if (!event) return;
 
-                // Check for early resolution (e.g., tool call verdict).
-                if (!resolvedEarly) {
-                    const result = onEvent(event);
-                    if (result !== null) {
-                        resolvedEarly = true;
-                        clearTimeout();
-                        resolve({ resolved: true, value: result });
-                        return;
-                    }
+                // Capture early result (e.g., tool call verdict) but keep running until close.
+                if (earlyResult === null) {
+                    earlyResult = onEvent(event);
                 }
 
                 // Capture assistant text for debugging / feedback fallback.
@@ -271,7 +265,16 @@ export async function runReadOnlyAgent<T>(options: ReadOnlyAgentOptions<T>): Pro
             clearTimeout();
             // Don't clear active task - another sub-agent may be running concurrently
 
-            if (resolvedEarly) return; // already resolved via onEvent callback
+            if (earlyResult !== null) {
+                resolve({
+                    resolved: true,
+                    value: earlyResult,
+                    lastAssistantText,
+                    code,
+                    killed: child.killed
+                });
+                return;
+            }
 
             // Check if watchdog killed this agent for idle/turns reasons.
             const monState = monitor.getMonitoredAgent(taggedId);
@@ -281,14 +284,23 @@ export async function runReadOnlyAgent<T>(options: ReadOnlyAgentOptions<T>): Pro
                 resolved: false,
                 code,
                 killedByWatchdog: killReason ?? undefined,
-                lastAssistantText
+                lastAssistantText,
+                killed: child.killed
             });
         });
 
         child.on("error", () => {
             clearTimeout();
-            if (!resolvedEarly) {
-                resolve({ resolved: false, code: null, lastAssistantText });
+            if (earlyResult !== null) {
+                resolve({
+                    resolved: true,
+                    value: earlyResult,
+                    lastAssistantText,
+                    code: null,
+                    killed: child.killed
+                });
+            } else {
+                resolve({ resolved: false, code: null, lastAssistantText, killed: child.killed });
             }
         });
     });
