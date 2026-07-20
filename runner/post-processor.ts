@@ -89,7 +89,7 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
         // Handle failure
         if (postTask?.status === "failed") {
             // Transition to failed state
-            if (!transitionTo("failed", postPlan)) {
+            if (!transitionTo("failed")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state in post-processor");
             }
             savePlanSafely(postPlan);
@@ -104,13 +104,14 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
         }
 
         // Check for graceful pause
-        const afterTaskPlan = StateManager.loadPlan();
-        if (afterTaskPlan?.status === "pausing") {
+        if (OrchestratorState.currentState === "pausing") {
             // Transition to paused state
-            if (!transitionTo("paused", afterTaskPlan)) {
+            if (!transitionTo("paused")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to paused state in post-processor");
             }
-            savePlanSafely(afterTaskPlan);
+            if (postPlan) {
+                savePlanSafely(postPlan);
+            }
             return notifyAndStop(pi, `System: Paused gracefully after task '${task.id}'.`);
         }
 

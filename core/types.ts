@@ -41,9 +41,9 @@ export function isTaskReadOnly(taskType?: TaskType): boolean {
 
 export interface OrchestrationPlan {
     goal: string;
-    status: "planning" | "implementing" | "pausing" | "paused" | "verifying" | "completed" | "failed" | "code_review" | "setup" | "replanning";
     currentTaskId?: string;
     tasks: Task[];
+    attributes?: string[];
 }
 
 export const ALL_TASK_STATUSES = [
@@ -56,7 +56,6 @@ export const ALL_TASK_STATUSES = [
     "failed"
 ] as const;
 export const ACTIVE_TASK_STATUSES = ["running", "validating", "summarizing", "awaiting_clarification"] as const;
-export const EXECUTION_PHASE_STATUSES = ["running", "validating", "summarizing"] as const;
 
 export interface Task {
     id: string; // e.g., "task_01"
@@ -103,6 +102,14 @@ export interface SubAgentEvent {
     success?: boolean;
     result?: unknown;
     error?: string;
+}
+
+/** Check if an event represents a tool call or execution start.
+ *
+ * Both legacy (`tool_call`) and streaming (`tool_execution_start`) formats are matched.
+ */
+export function isToolCallEvent(ev: SubAgentEvent): boolean {
+    return ev.type === "tool_call" || ev.type === "tool_execution_start";
 }
 
 /** Safely parse a raw JSON line into a SubAgentEvent. Returns null on failure. */

@@ -26,6 +26,7 @@ export const OrchestratorState = {
     currentState: "inactive" as OrchestrationState,
     pi: undefined as ExtensionAPI | undefined,
     theme: null as Theme | null,
+    plan: null as OrchestrationPlan | null,
 
     // --- Configured Models ---
     simpleTaskModel: null as ModelRef | null,
@@ -45,6 +46,7 @@ export const OrchestratorState = {
     allowStopTool: true, // when false, orchestrate_stop returns a nudge instead of halting
     validateSimpleTasks: false, // validation for simple tasks (default off)
     validateComplexTasks: true, // validation for complex tasks (default on)
+    debugLogTransitions: false, // log state transitions to TUI notifications (default off)
 
     // --- Configurable timeouts (milliseconds; 0 = no timeout) ---
     taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS, // default watchdog for sub-agent tasks (12 min)
@@ -87,11 +89,6 @@ export const OrchestratorState = {
     shuttingDown: false
 };
 
-/** Global idle timeout for any sub-agent — no JSON stream activity (milliseconds; 0 = disabled). */
-OrchestratorState.subAgentIdleTimeoutMs = DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS;
-/** Global maximum model turns for any sub-agent (0 = unlimited). */
-OrchestratorState.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
-
 /**
  * Transition the orchestrator into a specific mode.
  * Sets the current state via transitionTo, updates active tools,
@@ -105,11 +102,10 @@ OrchestratorState.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
 export function setOrchestrationMode(
     state: OrchestrationState,
     pi: ExtensionAPI,
-    onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void,
-    plan?: OrchestrationPlan
+    onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void
 ) {
-    // Delegate state transition and plan status sync to transitionTo
-    transitionTo(state, plan, true);
+    // Delegate state transition directly
+    transitionTo(state, true);
 
     updateActiveTools(pi);
 
@@ -128,6 +124,51 @@ export function setOrchestrationMode(
 
 /** Standard message shown when orchestration is not active. */
 export const NOT_ACTIVE_MSG = "Orchestration not active. Run /om-enable first.";
+
+// ---------------------------------------------------------------------------
+// Shared model switching helper (used by all switch/restore functions below)
+// ---------------------------------------------------------------------------
+
+/** Attempt to switch to a specific model. Returns true on success.
+ *
+ * Handles the common pattern: look up in registry → log if not found →
+ * call setModel() → notify user on success/failure.
+ *
+ * @param modelRef - The target model to switch to (null/undefined = skip)
+ * @param label - Human-readable label for notifications (e.g., "Planning model")
+ * @param pi - ExtensionAPI instance
+ * @param ctx - Context with modelRegistry and optional ui
+ */
+async function attemptModelSwitch(
+    modelRef: ModelRef | null | undefined,
+    label: string,
+    pi: ExtensionAPI,
+    ctx: { modelRegistry: { find: (provider: string, id: string) => any }; ui?: { notify?: (...args: any[]) => void } }
+): Promise<boolean> {
+    if (!modelRef) return false;
+
+    const targetModel = ctx.modelRegistry.find(modelRef.provider, modelRef.id);
+    if (!targetModel) {
+        const p = OrchestratorState.pi;
+        if (p) {
+            try { p.appendEntry("orchestration-status", { title: `${label} not found`, message: `${label} ${modelRef.provider}/${modelRef.id} not found in registry.`, timestamp: Date.now() }); } catch {}
+        }
+        return false;
+    }
+
+    const success = await pi.setModel(targetModel);
+    if (success) {
+        ctx.ui?.notify?.(`${label}: ${modelRef.provider}/${modelRef.id}`, "info");
+        return true;
+    }
+
+    const p2 = OrchestratorState.pi;
+    if (p2) {
+        try { p2.appendEntry("orchestration-status", { title: `No API key for ${label.toLowerCase()}`, message: `No API key available for ${label} ${modelRef.provider}/${modelRef.id}.`, timestamp: Date.now() }); } catch {}
+    }
+    ctx.ui?.notify?.(`Cannot switch to ${label.toLowerCase()} ${modelRef.provider}/${modelRef.id} - no configured API key.`, "warning");
+    return false;
+}
 
 /** Assert that the orchestrator extension has been initialized. */
 export function getPi(): ExtensionAPI {
@@ -155,6 +196,7 @@ export function requireActive(ctx: {
 const STATE_DEFAULTS = {
     currentState: "inactive" as OrchestrationState,
     theme: null as Theme | null,
+    plan: null as OrchestrationPlan | null,
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
     summaryModel: null as ModelRef | null,
@@ -180,6 +222,7 @@ const STATE_DEFAULTS = {
     allowStopTool: true,
     validateSimpleTasks: false,
     validateComplexTasks: true,
+    debugLogTransitions: false,
     taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS,
     validatorTimeoutMs: DEFAULT_VALIDATOR_TIMEOUT_MS,
     taskSummaryTimeoutMs: DEFAULT_SUMMARY_TIMEOUT_MS,
@@ -225,27 +268,7 @@ export async function switchToOrchestrationModel(
     pi: ExtensionAPI,
     ctx: { modelRegistry: { find: (provider: string, id: string) => any }; ui?: { notify?: (...args: any[]) => void } }
 ): Promise<boolean> {
-    const orchModel = OrchestratorState.orchestrationModel;
-    if (!orchModel) return false;
-
-    const targetModel = ctx.modelRegistry.find(orchModel.provider, orchModel.id);
-    if (!targetModel) {
-        const pi = OrchestratorState.pi;
-        if (pi) {
-            try { pi.appendEntry("orchestration-status", { title: "Orchestration model not found", message: `Orchestration model ${orchModel.provider}/${orchModel.id} not found in registry.`, timestamp: Date.now() }); } catch {}
-        }
-        return false;
-    }
-
-    const success = await pi.setModel(targetModel);
-    if (success) {
-        return true;
-    }
-    const pi2 = OrchestratorState.pi;
-    if (pi2) {
-        try { pi2.appendEntry("orchestration-status", { title: "No API key for orchestration model", message: `No API key available for orchestration model ${orchModel.provider}/${orchModel.id}.`, timestamp: Date.now() }); } catch {}
-    }
-    return false;
+    return attemptModelSwitch(OrchestratorState.orchestrationModel, "Switched to orchestration model", pi, ctx);
 }
 
 /**
@@ -259,21 +282,9 @@ export async function restoreMainModel(
     const original = OrchestratorState.originalMainModel;
     if (!original) return false;
 
-    const targetModel = ctx.modelRegistry.find(original.provider, original.id);
-    if (!targetModel) {
-        const p = OrchestratorState.pi;
-        if (p) { try { p.appendEntry("orchestration-status", { title: "Original model not found", message: `Original model ${original.provider}/${original.id} not found in registry.`, timestamp: Date.now() }); } catch {} }
-        return false;
-    }
-
-    const success = await pi.setModel(targetModel);
-    OrchestratorState.originalMainModel = undefined; // cleared on successful restore
-    if (success) {
-        return true;
-    }
-    const p2 = OrchestratorState.pi;
-    if (p2) { try { p2.appendEntry("orchestration-status", { title: "No API key for original model", message: `No API key available for original model ${original.provider}/${original.id}.`, timestamp: Date.now() }); } catch {} }
-    return false;
+    const success = await attemptModelSwitch(original, "Restored original main model", pi, ctx);
+    if (success) OrchestratorState.originalMainModel = undefined; // cleared on successful restore
+    return success;
 }
 
 /**
@@ -294,27 +305,7 @@ export async function enterPlanningMode(
         OrchestratorState.prePlanningModel = { provider: ctx.model.provider, id: ctx.model.id };
     }
 
-    const planningModel = OrchestratorState.planningModel;
-    if (!planningModel) return;
-
-    const targetModel = ctx.modelRegistry.find(planningModel.provider, planningModel.id);
-    if (!targetModel) {
-        const p = OrchestratorState.pi;
-        if (p) { try { p.appendEntry("orchestration-status", { title: "Planning model not found", message: `Planning model ${planningModel.provider}/${planningModel.id} not found in registry.`, timestamp: Date.now() }); } catch {} }
-        return;
-    }
-
-    const success = await pi.setModel(targetModel);
-    if (success) {
-        ctx.ui?.notify?.(`Switched to planning model: ${planningModel.provider}/${planningModel.id}`, "info");
-    } else {
-        const _p1 = OrchestratorState.pi;
-        if (_p1) { try { _p1.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for planning model ${planningModel.provider}/${planningModel.id}.`, timestamp: Date.now() }); } catch {} };
-        ctx.ui?.notify?.(
-            `Cannot switch to planning model ${planningModel.provider}/${planningModel.id} - no configured API key.`,
-            "warning"
-        );
-    }
+    await attemptModelSwitch(OrchestratorState.planningModel, "Switched to planning model", pi, ctx);
 }
 
 /**
@@ -331,25 +322,7 @@ export async function exitPlanningMode(
         return;
     }
 
-    const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
-    if (!targetModel) {
-        const _p2 = OrchestratorState.pi;
-        if (_p2) { try { _p2.appendEntry("orchestration-status", { title: "Orchestration status", message: `Pre-planning model ${pre.provider}/${pre.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
-        OrchestratorState.prePlanningModel = undefined;
-        return;
-    }
-
-    const success = await pi.setModel(targetModel);
-    if (success) {
-        ctx.ui?.notify?.("Restored pre-planning model.", "info");
-    } else {
-        const _p3 = OrchestratorState.pi;
-        if (_p3) { try { _p3.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for pre-planning model ${pre.provider}/${pre.id}.`, timestamp: Date.now() }); } catch {} };
-        ctx.ui?.notify?.(
-            `Cannot restore pre-planning model ${pre.provider}/${pre.id} - no configured API key.`,
-            "warning"
-        );
-    }
+    await attemptModelSwitch(pre, "Restored pre-planning model", pi, ctx);
     OrchestratorState.prePlanningModel = undefined;
 }
 
@@ -367,28 +340,7 @@ export async function switchToReviewerModel(
         OrchestratorState.preReviewModel = { provider: ctx.model.provider, id: ctx.model.id };
     }
 
-    const reviewerModel = OrchestratorState.reviewerModel;
-    if (!reviewerModel) return false;
-
-    const targetModel = ctx.modelRegistry.find(reviewerModel.provider, reviewerModel.id);
-    if (!targetModel) {
-        const _p4 = OrchestratorState.pi;
-        if (_p4) { try { _p4.appendEntry("orchestration-status", { title: "Orchestration status", message: `Reviewer model ${reviewerModel.provider}/${reviewerModel.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
-        return false;
-    }
-
-    const success = await pi.setModel(targetModel);
-    if (success) {
-        ctx.ui?.notify?.(`Switched to reviewer model: ${reviewerModel.provider}/${reviewerModel.id}`, "info");
-    } else {
-        const _p5 = OrchestratorState.pi;
-        if (_p5) { try { _p5.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for reviewer model ${reviewerModel.provider}/${reviewerModel.id}.`, timestamp: Date.now() }); } catch {} };
-        ctx.ui?.notify?.(
-            `Cannot switch to reviewer model ${reviewerModel.provider}/${reviewerModel.id} - no configured API key.`,
-            "warning"
-        );
-    }
-    return success;
+    return attemptModelSwitch(OrchestratorState.reviewerModel, "Switched to reviewer model", pi, ctx);
 }
 
 /**
@@ -405,25 +357,7 @@ export async function restoreFromReviewPhase(
         return;
     }
 
-    const targetModel = ctx.modelRegistry.find(pre.provider, pre.id);
-    if (!targetModel) {
-        const _p6 = OrchestratorState.pi;
-        if (_p6) { try { _p6.appendEntry("orchestration-status", { title: "Orchestration status", message: `Pre-review model ${pre.provider}/${pre.id} not found in registry.`, timestamp: Date.now() }); } catch {} };
-        OrchestratorState.preReviewModel = undefined;
-        return;
-    }
-
-    const success = await pi.setModel(targetModel);
-    if (success) {
-        ctx.ui?.notify?.("Restored pre-review model.", "info");
-    } else {
-        const _p7 = OrchestratorState.pi;
-        if (_p7) { try { _p7.appendEntry("orchestration-status", { title: "Orchestration status", message: `No API key available for pre-review model ${pre.provider}/${pre.id}.`, timestamp: Date.now() }); } catch {} };
-        ctx.ui?.notify?.(
-            `Cannot restore pre-review model ${pre.provider}/${pre.id} - no configured API key.`,
-            "warning"
-        );
-    }
+    await attemptModelSwitch(pre, "Restored pre-review model", pi, ctx);
     OrchestratorState.preReviewModel = undefined;
 }
 
@@ -433,6 +367,21 @@ export async function restoreFromReviewPhase(
  */
 export function beginShutdown(): void {
     OrchestratorState.shuttingDown = true;
+}
+
+/**
+ * Fire a TUI-only notification (non-fatal).
+ * Appends to the "orchestration-status" channel so it appears in the transcript
+ * without polluting LLM context. Uses `OrchestratorState.pi` internally.
+ * Safe to call before pi is initialised — silently no-ops if unavailable.
+ */
+export function notifyTui(msg: string): void {
+    const pi = OrchestratorState.pi;
+    if (pi) {
+        try {
+            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
+        } catch { /* non-fatal */ }
+    }
 }
 
 /**
@@ -537,22 +486,6 @@ export function resolveSummaryModel(fallback?: { provider: string; id: string })
 }
 
 /**
- * Resolve the effective model for plan-review agents.
- * Returns null if no reviewer model is configured (feature disabled).
- */
-export function resolveReviewerModel(): ModelRef | null {
-    return OrchestratorState.reviewerModel;
-}
-
-/**
- * Resolve the effective model for code-review agents.
- * Returns null if no code-review model is configured (feature disabled).
- */
-export function resolveCodeReviewModel(): ModelRef | null {
-    return OrchestratorState.codeReviewModel;
-}
-
-/**
  * Format a model for display, or return "(default)".
  */
 export function formatModel(m: ModelRef | null | undefined): string {
@@ -561,10 +494,13 @@ export function formatModel(m: ModelRef | null | undefined): string {
 }
 
 /** Count tasks by status. */
-function countTasksByStatus(plan: OrchestrationPlan): Record<string, number> {
+function countTasksByStatus(): Record<string, number> {
+    const plan = OrchestratorState.plan;
     const counts: Record<string, number> = {};
-    for (const task of plan.tasks || []) {
-        counts[task.status] = (counts[task.status] || 0) + 1;
+    if (plan) {
+        for (const task of plan.tasks || []) {
+            counts[task.status] = (counts[task.status] || 0) + 1;
+        }
     }
     return counts;
 }
@@ -573,7 +509,9 @@ function countTasksByStatus(plan: OrchestrationPlan): Record<string, number> {
  * Recover interrupted tasks: any task in 'running' or 'validating' was mid-execution.
  * Returns the number of recovered tasks.
  */
-export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
+export function recoverInterruptedTasks(): number {
+    const plan = OrchestratorState.plan;
+    if (!plan) return 0;
     let recovered = 0;
     for (const task of plan.tasks || []) {
         if (task.status === "running" || task.status === "validating" || task.status === "summarizing") {
@@ -668,8 +606,10 @@ export function truncateToSentence(text: string, maxChars: number = 120): string
 /**
  * Build a human-readable status summary for display.
  */
-export function buildStatusSummary(plan: OrchestrationPlan): string {
-    const counts = countTasksByStatus(plan);
+export function buildStatusSummary(): string {
+    const plan = OrchestratorState.plan;
+    if (!plan) return "No active plan";
+    const counts = countTasksByStatus();
     const parts: string[] = [];
 
     // Show phase/status indicator with granular label when in execution
@@ -678,10 +618,10 @@ export function buildStatusSummary(plan: OrchestrationPlan): string {
         parts.push(`Orchestration Status: planning`);
     } else if (isExecutingMode(state)) {
         const phase = computeExecutionPhaseLabel();
-        const label = phase ? `${phase.toLowerCase()}` : plan.status;
+        const label = phase ? `${phase.toLowerCase()}` : "implementing";
         parts.push(`Orchestration Status: ${label}`);
     } else {
-        parts.push(`Orchestration Status: ${plan.status}`);
+        parts.push(`Orchestration Status: inactive`);
     }
 
     if (plan.currentTaskId) {
@@ -733,12 +673,13 @@ export function setSubAgentMaxTurns(value: number): void {
 
 /** Toggle a boolean setting on OrchestratorState. */
 export function setBooleanSetting(
-    key: "allowStopTool" | "validateSimpleTasks" | "validateComplexTasks",
+    key: "allowStopTool" | "validateSimpleTasks" | "validateComplexTasks" | "debugLogTransitions",
     value: boolean
 ): void {
     if (key === "allowStopTool") OrchestratorState.allowStopTool = value;
     else if (key === "validateSimpleTasks") OrchestratorState.validateSimpleTasks = value;
-    else OrchestratorState.validateComplexTasks = value;
+    else if (key === "validateComplexTasks") OrchestratorState.validateComplexTasks = value;
+    else OrchestratorState.debugLogTransitions = value;
 }
 
 /** Set a model reference on OrchestratorState by key. Centralizes mutation of model config properties. */

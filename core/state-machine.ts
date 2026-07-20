@@ -1,5 +1,5 @@
-import { OrchestratorState } from "./state-singleton";
-import type { OrchestrationPlan } from "./types";
+import { OrchestratorState, notifyTui as coreNotifyTui } from "./state-singleton";
+import type { Task } from "./types";
 
 /**
  * Well-defined orchestration states.
@@ -54,7 +54,7 @@ export const STATE_TRANSITIONS: Record<OrchestrationState, Array<OrchestrationSt
   stopped: ["implementing", "replanning", "inactive"],
   resuming: ["implementing", "failed", "inactive"],
   failed: ["replanning", "implementing", "inactive"],
-  verifying: ["completed", "inactive"],
+  verifying: ["implementing", "replanning", "completed", "inactive"],
   completed: ["planning", "inactive"],
   code_review: ["implementing", "verifying", "stopped", "failed", "inactive"],
 };
@@ -67,102 +67,71 @@ export function getCurrentOrchestrationState(): OrchestrationState {
   return OrchestratorState.currentState;
 }
 
-/** Fire TUI-only notification (non-fatal). */
-function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
-        try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
-    }
-}
+
 
 /**
  * State transition function with validation.
  * Returns true if transition was successful, false if invalid.
- * Updates OrchestratorState.currentState and maps plan.status to match.
+ * Updates OrchestratorState.currentState.
  */
-export function transitionTo(newState: OrchestrationState, plan?: OrchestrationPlan, force = false): boolean {
+export function transitionTo(newState: OrchestrationState, force = false): boolean {
   const currentState = OrchestratorState.currentState;
 
   if (!force && !STATE_TRANSITIONS[currentState].includes(newState)) {
-    notifyTui(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
+    coreNotifyTui(`[state-machine] Invalid transition: ${currentState} → ${newState}`);
     return false;
   }
 
-  // Uncomment the following line to see all state transitions in the TUI
-  // notifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
+  if (OrchestratorState.debugLogTransitions) {
+    coreNotifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
+  }
 
   // Update OrchestratorState.currentState directly as the single source of truth
   OrchestratorState.currentState = newState;
-
-  // Update plan status to match as a projection of currentState
-  if (plan) {
-    plan.status = mapStateToPlanStatus(newState);
-  }
 
   return true;
 }
 
 /**
- * Map orchestration state to plan.json status field.
+ * Infer the OrchestrationState when resuming based on the state of tasks and attributes.
  */
-function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["status"] {
-  const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
-    inactive: "planning", // fallback
-    planning: "planning",
-    plan_review: "planning",
-    plan_reviewed: "planning",
-    setup: "setup",
-    implementing: "implementing",
-    replanning: "replanning",
-    pausing: "pausing",
-    paused: "paused",
-    stopped: "paused",
-    resuming: "implementing",
-    failed: "failed",
-    completed: "completed",
-    verifying: "verifying",
-    code_review: "code_review",
-  };
-  return mapping[state];
-}
-
-/**
- * Map plan status to orchestration state.
- */
-export function mapPlanStatusToState(status: OrchestrationPlan["status"]): OrchestrationState {
-  switch (status) {
-    case "planning":
-      return "planning";
-    case "setup":
-      return "setup";
-    case "implementing":
-      return "resuming";
-    case "replanning":
-      return "replanning";
-    case "pausing":
-      return "resuming";
-    case "paused":
-      return "resuming";
-    case "verifying":
-      return "verifying";
-    case "completed":
-      return "completed";
-    case "failed":
-      return "failed";
-    case "code_review":
-      return "code_review";
-    default:
-      return "planning";
+export function inferStateFromTasks(tasks: Task[], attributes: string[] = []): OrchestrationState {
+  if (attributes.includes("VERIFIED")) {
+    return "completed";
   }
-}
 
-/**
- * Get all valid transitions from a given state for documentation/debugging.
- */
-export function getValidTransitionsFrom(state: OrchestrationState): Array<OrchestrationState> {
-  return STATE_TRANSITIONS[state] || [];
+  if (attributes.includes("CODE_REVIEW_REJECTED")) {
+    return "code_review";
+  }
+
+  // If the plan has not been approved yet, we are in the planning phase.
+  if (!attributes.includes("PLAN_APPROVED")) {
+    return "planning";
+  }
+
+  if (!tasks || tasks.length === 0) {
+    return "setup";
+  }
+
+  // If any task is failed, resume in 'failed' so the user/orchestrator can replan
+  if (tasks.some((t) => t.status === "failed")) {
+    return "failed";
+  }
+
+  // If all tasks are completed
+  if (tasks.every((t) => t.status === "completed")) {
+    const codeReviewModel = OrchestratorState.codeReviewModel;
+    if (codeReviewModel) {
+      if (attributes.includes("CODE_REVIEW_APPROVED")) {
+        return "verifying";
+      }
+      return "code_review";
+    }
+    return "verifying";
+  }
+
+  // Default to implementing
+  return "implementing";
 }
 
 // ---------------------------------------------------------------------------

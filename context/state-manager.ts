@@ -4,32 +4,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { OrchestrationPlan, TaskType, ALL_TASK_STATUSES } from "../core/types";
-import { getCurrentOrchestrationState, type OrchestrationState } from "../core/state-machine";
-import { OrchestratorState } from "../core";
+import { OrchestratorState, notifyTui as coreNotifyTui } from "../core";
 
 const ORCHESTRATION_BASE = path.join(process.cwd(), CONFIG_DIR_NAME, "orchestration");
-
-/** Map orchestration state to plan.json status field. */
-function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["status"] {
-    const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
-        inactive: "planning",
-        planning: "planning",
-        plan_review: "planning",
-        plan_reviewed: "planning",
-        setup: "setup",
-        implementing: "implementing",
-        replanning: "replanning",
-        pausing: "pausing",
-        paused: "paused",
-        stopped: "paused",
-        resuming: "implementing",
-        failed: "failed",
-        completed: "completed",
-        verifying: "verifying",
-        code_review: "code_review",
-    };
-    return mapping[state];
-}
 
 /** Build a path under `.pi/orchestration/`. Optional `subDir` and `fileName` are appended. */
 function getOrchestrationPath(subDir?: string, fileName?: string): string {
@@ -85,9 +62,6 @@ function getAgentLogsDir(): string {
 /** @internal Listener registry for plan-change notifications. Called after every save/clear to trigger UI updates. */
 let planChangeListeners: Array<() => void> = [];
 
-/** @internal Cached copy of the loaded plan. Invalidated by emitPlanChange() so UI render cycles don't re-read disk. Uses undefined as "not yet populated" sentinel to distinguish from "plan doesn't exist". */
-let cachedPlan: OrchestrationPlan | null | undefined = undefined;
-
 /** @internal Cached copy of the implementation plan markdown content. Invalidated by clearPlan(). Uses undefined as "not yet populated" sentinel to distinguish from "plan doesn't exist". */
 let cachedImplementationPlan: string | null | undefined = undefined;
 
@@ -107,13 +81,27 @@ export function drainPlanChangeListeners(): void {
     planChangeListeners = [];
 }
 
-/** Fire TUI-only notification (non-fatal, uses OrchestratorState.pi). */
-function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
+let lastSavedPlanJson = "";
+let saveTimer: NodeJS.Timeout | null = null;
+
+export function startPlanSaveTimer(): void {
+    if (saveTimer) return;
+    saveTimer = setInterval(() => {
         try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
+            StateManager.flushPlan();
+        } catch (e) {
+            coreNotifyTui("StateManager auto-save error: " + String(e));
+        }
+    }, 1000);
+    if (saveTimer.unref) {
+        saveTimer.unref();
+    }
+}
+
+export function stopPlanSaveTimer(): void {
+    if (saveTimer) {
+        clearInterval(saveTimer);
+        saveTimer = null;
     }
 }
 
@@ -123,14 +111,13 @@ function notifyPlanChange(): void {
         try {
             listener();
         } catch (e) {
-            notifyTui("Plan change listener error: " + String(e));
+            coreNotifyTui("Plan change listener error: " + String(e));
         }
     }
 }
 
 /** Invalidate the in-memory cache and fire UI listeners. Used by clearPlan/clearPlanJsonOnly - disk state has been wiped, so we must re-read next time. */
 function emitPlanChange() {
-    cachedPlan = undefined;
     notifyPlanChange();
 }
 
@@ -194,9 +181,6 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     const plan = obj as Record<string, unknown>;
     if (typeof plan.goal !== "string") return false;
 
-    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review", "setup", "replanning"];
-    if (!validStatuses.includes(plan.status as string)) return false;
-
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
 
     if (!Array.isArray(plan.tasks)) return false;
@@ -238,22 +222,17 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     if (!obj || typeof obj !== "object") return null;
     const plan = obj as Record<string, unknown> & { tasks?: Array<Record<string, unknown>> };
 
-    // Plan-level fields must be intact - we can't recover a missing goal or bad status.
+    // Plan-level fields must be intact - we can't recover a missing goal.
     if (typeof plan.goal !== "string") {
-        notifyTui("Plan recovery failed: missing or invalid 'goal' field");
-        return null;
-    }
-    const validStatuses = ["planning", "implementing", "pausing", "paused", "verifying", "completed", "failed", "code_review", "setup", "replanning"];
-    if (!validStatuses.includes(plan.status as string)) {
-        notifyTui(`Plan recovery failed: invalid status ${JSON.stringify(plan.status)}`);
+        coreNotifyTui("Plan recovery failed: missing or invalid 'goal' field");
         return null;
     }
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") {
-        notifyTui("Plan recovery failed: invalid currentTaskId");
+        coreNotifyTui("Plan recovery failed: invalid currentTaskId");
         return null;
     }
     if (!Array.isArray(plan.tasks)) {
-        notifyTui("Plan recovery failed: tasks is not an array");
+        coreNotifyTui("Plan recovery failed: tasks is not an array");
         return null;
     }
 
@@ -312,7 +291,6 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     // Rebuild plan object with cleaned tasks.
     const repaired: OrchestrationPlan = {
         goal: plan.goal as string,
-        status: plan.status as OrchestrationPlan["status"],
         currentTaskId: typeof plan.currentTaskId === "string" ? (plan.currentTaskId as string) : undefined,
         tasks: tasks as unknown as OrchestrationPlan["tasks"]
     };
@@ -320,9 +298,9 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     // Final validation - if it passes, we have a recovered plan.
     if (isValidOrchestrationPlan(repaired)) {
         for (const w of warnings) {
-            notifyTui(`Plan recovery: ${w}`);
+            coreNotifyTui(`Plan recovery: ${w}`);
         }
-        notifyTui(
+        coreNotifyTui(
             `Plan recovered with repairs (${repaired.tasks.length} tasks retained). ` +
                 `The plan will be re-saved to persist the fixes.`
         );
@@ -330,7 +308,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     }
 
     // Recovery failed - log what we had and give up.
-    notifyTui(
+    coreNotifyTui(
         `Plan recovery failed after repairs (${warnings.length} issue(s) addressed, still invalid). ` +
             `The plan file may need manual intervention.`
     );
@@ -349,7 +327,7 @@ export function safeWriteFile(targetPath: string, content: string): void {
         try {
             fs.copyFileSync(targetPath, oldPath);
         } catch (copyErr) {
-            notifyTui(`Failed to create backup copy for ${targetPath}:` + String(copyErr));
+            coreNotifyTui(`Failed to create backup copy for ${targetPath}:` + String(copyErr));
         }
 
         // Only attempt fsync if the copy succeeded and the file exists.
@@ -358,7 +336,7 @@ export function safeWriteFile(targetPath: string, content: string): void {
             try {
                 fs.fsyncSync(fdOld);
             } catch (fsyncErr) {
-                notifyTui(`Backup fsync failed for ${oldPath} - new write will proceed without synced backup: ${String(fsyncErr)}`);
+                coreNotifyTui(`Backup fsync failed for ${oldPath} - new write will proceed without synced backup: ${String(fsyncErr)}`);
             } finally {
                 fs.closeSync(fdOld);
             }
@@ -407,10 +385,6 @@ export class StateManager {
      * Returns null if the file is missing or structurally invalid.
      */
     static loadPlan(): OrchestrationPlan | null {
-        // Return cached plan if available - avoids repeated sync disk reads in UI render cycles.
-        // Cache is invalidated by emitPlanChange() on every save/clear operation.
-        if (cachedPlan !== undefined) return cachedPlan;
-
         const planPath = getPlanJsonPath();
 
         function tryLoad(filePath: string): OrchestrationPlan | null {
@@ -419,14 +393,12 @@ export class StateManager {
                 const data = fs.readFileSync(filePath, "utf-8");
                 const parsed = JSON.parse(data);
                 if (isValidOrchestrationPlan(parsed)) {
-                    cachedPlan = parsed;
                     return parsed;
                 }
 
                 // Strict validation failed - attempt best-effort recovery.
                 const recovered = recoverPlan(parsed);
                 if (recovered) {
-                    cachedPlan = recovered;
                     // Persist the repaired plan so subsequent loads are fast.
                     try {
                         safeWriteFile(filePath, JSON.stringify(recovered, null, 2));
@@ -436,30 +408,15 @@ export class StateManager {
                     return recovered;
                 }
 
-                notifyTui(`Loaded ${filePath} is structurally invalid`);
+                coreNotifyTui(`Loaded ${filePath} is structurally invalid`);
             } catch (e) {
-                notifyTui(`Failed to parse ${filePath}: ${String(e)}`);
+                coreNotifyTui(`Failed to parse ${filePath}: ${String(e)}`);
             }
             return null;
         }
 
         const primary = tryLoad(planPath);
         if (primary) {
-            // Ensure plan status is consistent with current orchestration state
-            const currentState = getCurrentOrchestrationState();
-            if (currentState !== "inactive") {
-                const expectedStatus = mapStateToPlanStatus(currentState);
-                if (primary.status !== expectedStatus) {
-                    notifyTui(`[state-manager] Plan status mismatch: '${primary.status}' vs expected '${expectedStatus}'. Correcting.`);
-                    primary.status = expectedStatus;
-                    try {
-                        safeWriteFile(getPlanJsonPath(), JSON.stringify(primary, null, 2));
-                    } catch (e) {
-                        notifyTui(`Failed to persist corrected plan status: ${String(e)}`);
-                    }
-                }
-            }
-            cachedPlan = primary;
             return primary;
         }
 
@@ -468,8 +425,7 @@ export class StateManager {
         // Always attempt backup recovery, even if primary was deleted by the user.
         const backup = tryLoad(backupPath);
         if (backup) {
-            notifyTui(`Recovered plan from backup: ${backupPath}`);
-            cachedPlan = backup;
+            coreNotifyTui(`Recovered plan from backup: ${backupPath}`);
             return backup;
         }
 
@@ -479,31 +435,40 @@ export class StateManager {
         // Always attempt legacy primary first, then legacy backup regardless of primary existence.
         const legacyPrimary = tryLoad(legacyPath);
         if (legacyPrimary) {
-            cachedPlan = legacyPrimary;
             return legacyPrimary;
         }
         const legacyBkp = tryLoad(legacyBackup);
         if (legacyBkp) {
-            notifyTui(`Recovered plan from legacy backup: ${legacyBackup}`);
-            cachedPlan = legacyBkp;
+            coreNotifyTui(`Recovered plan from legacy backup: ${legacyBackup}`);
             return legacyBkp;
         }
 
-        cachedPlan = null;
         return null;
     }
 
     /**
-     * Save the plan to `plans/plan.json` atomically (write-to-temp + rename).
-     * Also re-renders `plans/plan.md` and emits a plan-change event.
-     * On first save after migration, cleans up legacy root-level files.
-     * Throws on I/O failure.
+     * Checks if the OrchestratorState JSON plan has changed, and if so,
+     * takes a snapshot and commits it to disk.
      */
-    static savePlan(plan: OrchestrationPlan): void {
+    static flushPlan(): void {
+        const plan = OrchestratorState.plan;
+        if (!plan) {
+            lastSavedPlanJson = "";
+            return;
+        }
+
+        const currentJson = JSON.stringify(plan);
+        if (currentJson === lastSavedPlanJson) {
+            return;
+        }
+
         try {
             this.initDirs();
+            // Take a snapshot (deep clone) for purposes of safely writing
+            const snapshot = JSON.parse(currentJson) as OrchestrationPlan;
+
             const planPath = getPlanJsonPath();
-            safeWriteFile(planPath, JSON.stringify(plan, null, 2));
+            safeWriteFile(planPath, JSON.stringify(snapshot, null, 2));
 
             // One-shot migration cleanup: remove legacy root-level plan files
             for (const getter of [legacyPlanJsonPath, legacyImplementationPlanPath, legacyPlanMdPath]) {
@@ -528,23 +493,32 @@ export class StateManager {
                 }
             }
 
-            this.renderMarkdown(plan);
-
-            // Update in-memory cache - we already have the authoritative plan object.
-            // No need to re-read from disk on next loadPlan().
-            cachedPlan = plan;
+            this.renderMarkdown(snapshot);
+            lastSavedPlanJson = currentJson;
 
             notifyPlanChange();
         } catch (e) {
-            notifyTui("StateManager: Failed to save plan.json - " + String(e));
-            throw new Error(`StateManager failed to persist plan state: ${(e as Error).message}`, { cause: e });
+            coreNotifyTui("StateManager: Failed to save plan.json - " + String(e));
         }
+    }
+
+    /**
+     * Save the plan to `plans/plan.json` atomically (write-to-temp + rename).
+     * Also re-renders `plans/plan.md` and emits a plan-change event.
+     * On first save after migration, cleans up legacy root-level files.
+     * Throws on I/O failure.
+     */
+    static savePlan(plan: OrchestrationPlan): void {
+        OrchestratorState.plan = plan;
+        this.flushPlan();
     }
 
     /** Remove all orchestration files (plans/, tasks/, archive/, agent-logs/, summaries/, validations/). */
     static clearPlan(): void {
         cachedImplementationPlan = undefined; // invalidate implementation plan cache
         cachedPlanReview = undefined; // invalidate plan review cache
+        OrchestratorState.plan = null;
+        lastSavedPlanJson = "";
         const unlinkIfExists = (p: string) => {
             if (fs.existsSync(p)) fs.unlinkSync(p);
         };
@@ -576,6 +550,8 @@ export class StateManager {
 
     /** Clear plan.json and plan.md but preserve implementation-plan.md. */
     static clearPlanJsonOnly(): void {
+        OrchestratorState.plan = null;
+        lastSavedPlanJson = "";
         const unlinkIfExists = (p: string) => {
             if (fs.existsSync(p)) fs.unlinkSync(p);
         };
@@ -707,7 +683,7 @@ export class StateManager {
         lines.push(`# Goal: ${esc(plan.goal)}\n`);
         lines.push("## Status");
         lines.push(`- **Current Task**: ${plan.currentTaskId || "None"}`);
-        lines.push(`- **Overall Status**: ${plan.status}\n`);
+        lines.push(`- **Overall Status**: ${OrchestratorState.currentState}\n`);
 
         lines.push("## Tasks\n");
 
@@ -858,7 +834,7 @@ export class StateManager {
             try {
                 fs.unlinkSync(filePath);
             } catch (err) {
-                notifyTui(`Failed to delete code-review.md: ${String(err)}`);
+                coreNotifyTui(`Failed to delete code-review.md: ${String(err)}`);
             }
         }
     }

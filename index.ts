@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StateManager, drainPlanChangeListeners } from "./context/state-manager";
+import { StateManager, drainPlanChangeListeners, startPlanSaveTimer, stopPlanSaveTimer } from "./context/state-manager";
 import { Runner } from "./runner";
 import { killAllProcesses, activeProcesses } from "./process/process-manager";
 import {
@@ -42,7 +42,7 @@ import {
     resetLoopBreakerFlag,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
-import { transitionTo, isActive, isPlanningMode, isExecutingMode } from "./core/state-machine";
+import { transitionTo, isActive, isPlanningMode, isExecutingMode, inferStateFromTasks } from "./core/state-machine";
 
 import {
     ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
@@ -118,19 +118,26 @@ export default function (pi: ExtensionAPI) {
         // Restore persisted model preferences
         applySettingsToState(OrchestratorState);
 
+        // Start the auto-save plan timer
+        startPlanSaveTimer();
+
         // Just notify about an existing plan - don't auto-activate orchestration.
         // The user must explicitly run /om-enable to proceed.
-        const plan = StateManager.loadPlan();
-        if (plan && plan.status !== "completed") {
-            ctx.ui.notify(
-                `Incomplete orchestration plan found: "${plan.goal}" (${plan.status}). Run /om-enable to resume or discard.`,
-                "warning"
-            );
-        } else if (plan) {
-            ctx.ui.notify(
-                `Previous orchestration completed. Goal: "${plan.goal}". Run /om-enable to start a new plan.`,
-                "info"
-            );
+        OrchestratorState.plan = StateManager.loadPlan();
+        const plan = OrchestratorState.plan;
+        if (plan) {
+            const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
+            if (inferred !== "completed") {
+                ctx.ui.notify(
+                    `Incomplete orchestration plan found: "${plan.goal}". Run /om-enable to resume or discard.`,
+                    "warning"
+                );
+            } else {
+                ctx.ui.notify(
+                    `Previous orchestration completed. Goal: "${plan.goal}". Run /om-enable to start a new plan.`,
+                    "info"
+                );
+            }
         }
 
         updateActiveTools(pi);
@@ -141,6 +148,9 @@ export default function (pi: ExtensionAPI) {
             clearInterval(watchdogTimer);
             watchdogTimer = null;
         }
+        // Stop the auto-save timer
+        stopPlanSaveTimer();
+
         // Signal the runner to stop writing stale state
         beginShutdown();
         // Cancel any in-flight task summaries
@@ -149,12 +159,11 @@ export default function (pi: ExtensionAPI) {
         drainPlanChangeListeners();
 
         // Recover in-flight tasks and save them back to 'pending' on disk
-        const plan = StateManager.loadPlan();
-        if (plan) {
-            const recovered = recoverInterruptedTasks(plan);
+        if (OrchestratorState.plan) {
+            const recovered = recoverInterruptedTasks();
             if (recovered > 0) {
                 try {
-                    StateManager.savePlan(plan);
+                    StateManager.savePlan(OrchestratorState.plan);
                 } catch (e) {
                     notifyTuiOnly(pi, "Failed to persist recovered tasks during shutdown: " + String(e));
                 }
@@ -198,8 +207,7 @@ export default function (pi: ExtensionAPI) {
             }
 
             if (isExecutingMode(OrchestratorState.currentState)) {
-                const plan = StateManager.loadPlan();
-                if (plan && plan.status === "code_review") {
+                if (OrchestratorState.currentState === "code_review") {
                     return { systemPrompt: ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT };
                 }
                 return { systemPrompt: ORCHESTRATOR_EXECUTION_SYSTEM_PROMPT };
@@ -246,12 +254,17 @@ export default function (pi: ExtensionAPI) {
             OrchestratorState._pendingReviewCompletion = true;
         } else if (event.toolName === "orchestrate_approve_goal" && isExecutingMode(OrchestratorState.currentState)) {
             // Final approval - transition to completed state
-            const plan = StateManager.loadPlan();
-            if (plan) {
-                if (!transitionTo("completed", plan)) {
+            if (OrchestratorState.plan) {
+                if (!OrchestratorState.plan.attributes) {
+                    OrchestratorState.plan.attributes = [];
+                }
+                if (!OrchestratorState.plan.attributes.includes("VERIFIED")) {
+                    OrchestratorState.plan.attributes.push("VERIFIED");
+                }
+                if (!transitionTo("completed")) {
                     notifyTuiOnly(pi, "Failed to transition to completed state after approve_goal");
                 }
-                StateManager.savePlan(plan);
+                StateManager.savePlan(OrchestratorState.plan);
             }
         }
     });

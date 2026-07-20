@@ -2,7 +2,6 @@
 export {
     ALL_TASK_STATUSES,
     ACTIVE_TASK_STATUSES,
-    EXECUTION_PHASE_STATUSES,
     FULL_TOOLS,
     READ_ONLY_TOOLS,
     ARTIFACT_PRODUCING_TOOLS,
@@ -13,6 +12,7 @@ export {
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_MAX_TURNS,
     isTaskReadOnly,
+    isToolCallEvent,
     tryParseSubAgentEvent,
     getEventToolName,
     getEventParams
@@ -35,6 +35,7 @@ export {
     enterPlanningMode,
     exitPlanningMode,
     beginShutdown,
+    notifyTui,
     updateActiveTools,
     resolveTaskModelByComplexity,
     resolveValidatorModel,

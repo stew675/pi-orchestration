@@ -6,7 +6,7 @@ import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
 import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
 import { isActive as stateIsActive } from "../core/state-machine";
-import type { Task, TaskType } from "../core/types";
+import { isTaskReadOnly, type Task, type TaskType } from "../core/types";
 import { healDependenciesOnDelete } from "../validation/validation";
 import {
     validatePlan,
@@ -15,8 +15,7 @@ import {
     requireTaskCrudPrereqs,
     sendSilentGuidance,
     validateAddTask,
-    validateEditTask,
-    validateDeleteTask
+    validateEditTask
 } from "./shared";
 
 /** Task ID naming convention prefix. */
@@ -204,7 +203,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             // Empty dependencies check for non-read-only tasks
             const taskType = (params.taskType as TaskType) || "other";
             if (!params.dependencies || params.dependencies.length === 0) {
-                const isReadOnly = taskType === "reviewing" || taskType === "research";
+                const isReadOnly = isTaskReadOnly(taskType);
                 if (!isReadOnly && (params.files?.length ?? 0) > 0) {
                     warnings.push(
                         `Guidance: task '${params.id}' has no dependencies but modifies files. ` +

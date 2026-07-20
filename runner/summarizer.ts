@@ -1,9 +1,8 @@
 import type { ModelRef, Task } from "../core/types";
-import { READ_ONLY_TOOLS, tryParseSubAgentEvent } from "../core/types";
+import { READ_ONLY_TOOLS } from "../core/types";
 import { OrchestratorState, getPi } from "../core";
-import * as monitor from "../process/monitor";
 import { StateManager } from "../context/state-manager";
-import { spawnAgent } from "../process/process-manager";
+import { runReadOnlyAgent } from "./subagent-spawner";
 import { savePlanSafely, notifyTuiOnly } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
 
@@ -142,7 +141,7 @@ export function resetSummarizer(): void {
     summaryWaitQueue.length = 0;
 }
 
-/** @internal Kept for future per-task summary cancellation. Currently unused - use {@link cancelAllSummaries} for shutdown. */
+/** Cancel a specific pending task summary (used by orchestrate_complete_task). */
 export function cancelTaskSummary(taskId: string): void {
     pendingSummaries.delete(taskId);
 }
@@ -173,8 +172,7 @@ async function runTaskSummaryAsync(
 
 /** Wake the runner so it can schedule the next ready task after an async summary completes. */
 function resumeRunnerAfterSummary(): void {
-    const p = StateManager.loadPlan();
-    if (p?.status === "implementing" && OrchestratorState.summarizationConcurrency > 0) {
+    if (OrchestratorState.currentState === "implementing" && OrchestratorState.summarizationConcurrency > 0) {
         try {
             const pi = getPi();
             import("../runner").then(({ Runner }) => {
@@ -352,87 +350,47 @@ async function runSummaryOnce(
     _attempt = 1
 ): Promise<{ summary?: string; error?: string }> {
     const monitorId = `${taskId}-summary`;
-    return await new Promise((resolve) => {
-        const args = [
-            "--mode",
-            "json",
-            "--no-session",
-            "--tools",
-            READ_ONLY_TOOLS,
-            "--append-system-prompt",
-            promptContent
-        ];
-        if (model) {
-            args.push("--model", `${model.provider}/${model.id}`);
-        }
-        args.push(
-            "-p",
-            "Inspect every artifact file with read and produce a complete, detailed summary of all public APIs, data types, and design constraints. Be exhaustive - downstream tasks depend on this."
-        );
+    const args = [
+        "--mode",
+        "json",
+        "--no-session",
+        "--tools",
+        READ_ONLY_TOOLS,
+        "--append-system-prompt",
+        promptContent
+    ];
+    if (model) {
+        args.push("--model", `${model.provider}/${model.id}`);
+    }
+    args.push(
+        "-p",
+        "Inspect every artifact file with read and produce a complete, detailed summary of all public APIs, data types, and design constraints. Be exhaustive - downstream tasks depend on this."
+    );
 
-        let summaryText: string | undefined;
-
-        const { child, clearTimeout } = spawnAgent(
-            args,
-            {
-                timeoutMs: OrchestratorState.taskSummaryTimeoutMs,
-                label: `task-summary ${taskId}`,
-                taskId: monitorId
-            },
-            (line) => {
-                // Feed every raw line to the monitor for JSON parsing.
-                // skipActive: true so the summarizer doesn't hijack the /om-status view.
-                monitor.ingestLine(monitorId, line, { skipActive: true });
-
-                const event = tryParseSubAgentEvent(line);
-                if (event && event.type === "message_end" && event.message?.role === "assistant") {
-                    for (const part of event.message.content || []) {
-                        if ((part as Record<string, unknown>).type === "text") {
-                            summaryText = String((part as Record<string, unknown>).text).trim();
-                        }
-                    }
-                }
-            }
-        );
-
-        // Register with the unified monitor so watchdog can enforce idle/turns limits.
-        const taggedId = `summarization-${taskId}`;
-        monitor.registerAgent(taggedId, child);
-
-        child.on("close", (code) => {
-            clearTimeout();
-            // Don't clear active task - another sub-agent may be running concurrently
-
-            // Check if watchdog killed this agent for idle/turns reasons.
-            const taggedId = `summarization-${taskId}`;
-            const monState = monitor.getMonitoredAgent(taggedId);
-            const killReason = monState?.killedByWatchdog ?? null;
-
-            if (killReason === "idle_timeout") {
-                resolve({ error: `Summary idle timeout — no JSON stream activity for ${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)}.` });
-                return;
-            }
-            if (killReason === "max_turns") {
-                resolve({ error: `Summary exceeded max turns limit of ${OrchestratorState.subAgentMaxTurns}.` });
-                return;
-            }
-
-            if (code !== 0 || !summaryText) {
-                const reason =
-                    code !== 0
-                        ? `Summary process exited with code ${code}`
-                        : "Summary process exited cleanly but produced no assistant output (LLM may have crashed).";
-                resolve({ error: reason });
-            } else {
-                resolve({ summary: summaryText });
-            }
-        });
-
-        child.on("error", (err) => {
-            clearTimeout();
-            // Don't clear active task - another sub-agent may be running concurrently
-            notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Error: ${err.message}`);
-            resolve({ error: err.message });
-        });
+    const res = await runReadOnlyAgent<never>({
+        taggedId: `summarization-${taskId}`,
+        args,
+        label: `task-summary ${taskId}`,
+        timeoutMs: OrchestratorState.taskSummaryTimeoutMs,
+        taskId: monitorId,
+        captureAssistantText: true,
+        onEvent: () => null // Summarizer runs until process close - no early resolution
     });
+
+    if (res.killedByWatchdog === "idle_timeout") {
+        return { error: `Summary idle timeout — no JSON stream activity for ${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)}.` };
+    }
+    if (res.killedByWatchdog === "max_turns") {
+        return { error: `Summary exceeded max turns limit of ${OrchestratorState.subAgentMaxTurns}.` };
+    }
+
+    if (res.code !== 0 || !res.lastAssistantText) {
+        const reason =
+            res.code !== 0
+                ? `Summary process exited with code ${res.code}`
+                : "Summary process exited cleanly but produced no assistant output (LLM may have crashed).";
+        return { error: reason };
+    } else {
+        return { summary: res.lastAssistantText };
+    }
 }

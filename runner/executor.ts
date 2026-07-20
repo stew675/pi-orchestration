@@ -315,7 +315,7 @@ async function runTaskSubAgent(
             }
 
             // Transition to failed state
-            if (!transitionTo("failed", p)) {
+            if (!transitionTo("failed")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after task kill");
             }
             savePlanSafely(p);
@@ -334,7 +334,7 @@ async function runTaskSubAgent(
             t.validatorFeedback = feedback;
 
             // Transition to failed state
-            if (!transitionTo("failed", p)) {
+            if (!transitionTo("failed")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after non-zero exit");
             }
             savePlanSafely(p);

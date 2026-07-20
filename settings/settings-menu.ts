@@ -13,9 +13,54 @@ import {
 import { isActive as stateIsActive, isPlanningMode } from "../core/state-machine";
 import { persistSettings, resetToDefaults } from "./settings";
 import { createModelPicker } from "../ui/model-picker";
-import { parseTimeout, formatTimeout } from "./time-utils";
+import { parseTimeout, formatTimeout, formatTimeoutCompact } from "./time-utils";
 import { getKeybindings } from "@earendil-works/pi-tui";
 import { notifyTuiOnly } from "../runner/utils";
+
+// ---------------------------------------------------------------------------
+// Shared submenu builder — standard Container → Border → Title → SelectList layout
+// ---------------------------------------------------------------------------
+
+function buildSubmenu(
+    ctx: ExtensionContext,
+    title: string,
+    items: SelectItem[],
+    helpText: string,
+    initialIndex: number = 0
+): Promise<string | null> {
+    return ctx.ui.custom<string | null>(
+        (tui, theme, _kb, done) => {
+            const container = new Container();
+            container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+            container.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
+
+            const selectList = new SelectList(items, Math.min(items.length, 18), {
+                selectedPrefix: (t) => theme.fg("accent", t),
+                selectedText: (t) => theme.fg("accent", t),
+                description: (t) => theme.fg("muted", t),
+                scrollInfo: (t) => theme.fg("dim", t),
+                noMatch: (t) => theme.fg("warning", t)
+            });
+            selectList.setSelectedIndex(initialIndex);
+            selectList.onSelect = (item) => done(item.value);
+            selectList.onCancel = () => done(null);
+            container.addChild(selectList);
+            container.addChild(new Text(theme.fg("dim", helpText), 1, 0));
+            container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+            return {
+                render: (w) => container.render(w),
+                invalidate: () => container.invalidate(),
+                handleInput: (data) => {
+                    selectList.handleInput(data);
+                    tui.requestRender();
+                }
+            };
+        },
+        { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
+    );
+}
+
 
 /** Mapping of model scope identifiers to their OrchestratorState property keys and display labels. */
 const MODEL_SCOPES: Record<
@@ -79,7 +124,8 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 `  Sub-agent max turns:   ${OrchestratorState.subAgentMaxTurns}\n` +
                 `  Allow stop tool:       ${OrchestratorState.allowStopTool ? "enabled" : "disabled"}\n` +
                 `  Validate simple tasks: ${OrchestratorState.validateSimpleTasks ? "enabled" : "disabled"}\n` +
-                `  Validate complex tasks: ${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"}\n\n` +
+                `  Validate complex tasks: ${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"}\n` +
+                `  Debug transitions:     ${OrchestratorState.debugLogTransitions ? "enabled" : "disabled"}\n\n` +
                 `Use /om-settings in TUI mode for interactive configuration, or:\n` +
                 `  /om-settings orchestration <provider/model>\n` +
                 `  /om-settings planning <provider/model>\n` +
@@ -98,43 +144,12 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
 
     // --- Top-level menu (category level) ---
     const showTopMenu = (initialIndex: number = 0) => {
-        return ctx.ui.custom<string | null>(
-            (tui, theme, _kb, done) => {
-                const container = new Container();
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-                container.addChild(new Text(theme.fg("accent", theme.bold("Orchestration Settings")), 1, 0));
-
-                const topItems: SelectItem[] = [
-                    { value: "models", label: "Models" },
-                    { value: "execution", label: "Execution" },
-                    { value: "behavior", label: "Behavior" }
-                ];
-
-                const selectList = new SelectList(topItems, Math.min(topItems.length, 18), {
-                    selectedPrefix: (t) => theme.fg("accent", t),
-                    selectedText: (t) => theme.fg("accent", t),
-                    description: (t) => theme.fg("muted", t),
-                    scrollInfo: (t) => theme.fg("dim", t),
-                    noMatch: (t) => theme.fg("warning", t)
-                });
-                selectList.setSelectedIndex(initialIndex);
-                selectList.onSelect = (item) => done(item.value);
-                selectList.onCancel = () => done(null);
-                container.addChild(selectList);
-                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel"), 1, 0));
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                return {
-                    render: (w) => container.render(w),
-                    invalidate: () => container.invalidate(),
-                    handleInput: (data) => {
-                        selectList.handleInput(data);
-                        tui.requestRender();
-                    }
-                };
-            },
-            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
-        );
+        const topItems: SelectItem[] = [
+            { value: "models", label: "Models" },
+            { value: "execution", label: "Execution" },
+            { value: "behavior", label: "Behavior" }
+        ];
+        return buildSubmenu(ctx, "Orchestration Settings", topItems, "↑↓ navigate • enter select • esc cancel", initialIndex);
     };
 
     // --- Models sub-menu ---
@@ -152,40 +167,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         ];
     }
 
-    const showModelsMenu = (initialIndex: number = 0) => {
-        return ctx.ui.custom<string | null>(
-            (tui, theme, _kb, done) => {
-                const container = new Container();
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-                container.addChild(new Text(theme.fg("accent", theme.bold("Models")), 1, 0));
-
-                const items = buildModelItems();
-                const selectList = new SelectList(items, Math.min(items.length, 18), {
-                    selectedPrefix: (t) => theme.fg("accent", t),
-                    selectedText: (t) => theme.fg("accent", t),
-                    description: (t) => theme.fg("muted", t),
-                    scrollInfo: (t) => theme.fg("dim", t),
-                    noMatch: (t) => theme.fg("warning", t)
-                });
-                selectList.setSelectedIndex(initialIndex);
-                selectList.onSelect = (item) => done(item.value);
-                selectList.onCancel = () => done(null);
-                container.addChild(selectList);
-                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc back"), 1, 0));
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                return {
-                    render: (w) => container.render(w),
-                    invalidate: () => container.invalidate(),
-                    handleInput: (data) => {
-                        selectList.handleInput(data);
-                        tui.requestRender();
-                    }
-                };
-            },
-            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
-        );
-    };
+    const showModelsMenu = (initialIndex: number = 0) => buildSubmenu(ctx, "Models", buildModelItems(), "↑↓ navigate • enter select • esc back", initialIndex);
 
     // --- Execution sub-menu ---
     function buildExecutionItems(): SelectItem[] {
@@ -200,84 +182,19 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         ];
     }
 
-    const showExecutionMenu = (initialIndex: number = 0) => {
-        return ctx.ui.custom<string | null>(
-            (tui, theme, _kb, done) => {
-                const container = new Container();
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-                container.addChild(new Text(theme.fg("accent", theme.bold("Execution")), 1, 0));
-
-                const items = buildExecutionItems();
-                const selectList = new SelectList(items, Math.min(items.length, 18), {
-                    selectedPrefix: (t) => theme.fg("accent", t),
-                    selectedText: (t) => theme.fg("accent", t),
-                    description: (t) => theme.fg("muted", t),
-                    scrollInfo: (t) => theme.fg("dim", t),
-                    noMatch: (t) => theme.fg("warning", t)
-                });
-                selectList.setSelectedIndex(initialIndex);
-                selectList.onSelect = (item) => done(item.value);
-                selectList.onCancel = () => done(null);
-                container.addChild(selectList);
-                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc back"), 1, 0));
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                return {
-                    render: (w) => container.render(w),
-                    invalidate: () => container.invalidate(),
-                    handleInput: (data) => {
-                        selectList.handleInput(data);
-                        tui.requestRender();
-                    }
-                };
-            },
-            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
-        );
-    };
+    const showExecutionMenu = (initialIndex: number = 0) => buildSubmenu(ctx, "Execution", buildExecutionItems(), "↑↓ navigate • enter select • esc back", initialIndex);
 
     // --- Behavior sub-menu ---
     function buildBehaviorItems(): SelectItem[] {
         return [
             { value: "allow-stop-tool", label: `Allow orchestrate_stop (${OrchestratorState.allowStopTool ? "enabled" : "disabled"})` },
             { value: "validate-simple-tasks", label: `Validate simple tasks (${OrchestratorState.validateSimpleTasks ? "enabled" : "disabled"})` },
-            { value: "validate-complex-tasks", label: `Validate complex tasks (${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"})` }
+            { value: "validate-complex-tasks", label: `Validate complex tasks (${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"})` },
+            { value: "debug-log-transitions", label: `Debug state transitions (${OrchestratorState.debugLogTransitions ? "enabled" : "disabled"})` }
         ];
     }
 
-    const showBehaviorMenu = (initialIndex: number = 0) => {
-        return ctx.ui.custom<string | null>(
-            (tui, theme, _kb, done) => {
-                const container = new Container();
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-                container.addChild(new Text(theme.fg("accent", theme.bold("Behavior")), 1, 0));
-
-                const items = buildBehaviorItems();
-                const selectList = new SelectList(items, Math.min(items.length, 18), {
-                    selectedPrefix: (t) => theme.fg("accent", t),
-                    selectedText: (t) => theme.fg("accent", t),
-                    description: (t) => theme.fg("muted", t),
-                    scrollInfo: (t) => theme.fg("dim", t),
-                    noMatch: (t) => theme.fg("warning", t)
-                });
-                selectList.setSelectedIndex(initialIndex);
-                selectList.onSelect = (item) => done(item.value);
-                selectList.onCancel = () => done(null);
-                container.addChild(selectList);
-                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter toggle • esc back"), 1, 0));
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                return {
-                    render: (w) => container.render(w),
-                    invalidate: () => container.invalidate(),
-                    handleInput: (data) => {
-                        selectList.handleInput(data);
-                        tui.requestRender();
-                    }
-                };
-            },
-            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
-        );
-    };
+    const showBehaviorMenu = (initialIndex: number = 0) => buildSubmenu(ctx, "Behavior", buildBehaviorItems(), "↑↓ navigate • enter toggle • esc back", initialIndex);
 
     // Build a strategy map for menu dispatch.
     const choiceHandlers: Record<string, () => Promise<void>> = {
@@ -344,6 +261,14 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 () => OrchestratorState.validateComplexTasks,
                 (v) => setBooleanSetting("validateComplexTasks", v),
                 (v) => `Validation for complex tasks ${v ? "enabled" : "disabled"}.`
+            );
+        },
+        "debug-log-transitions": async () => {
+            toggleBooleanSetting(
+                ctx,
+                () => OrchestratorState.debugLogTransitions,
+                (v) => setBooleanSetting("debugLogTransitions", v),
+                (v) => `Debug state transition logging ${v ? "enabled" : "disabled"}.`
             );
         },
         "reset-defaults": async () => {
@@ -506,58 +431,51 @@ async function handleModelSelection(
     }
 }
 
-/**
- * Open a custom reviewer model picker that includes a "(None)" sentinel option.
- * This is separate from handleModelSelection because the standard picker doesn't support disabling.
- */
-interface ReviewerPickerItem {
+/** Shared picker for optional model scopes (reviewer, code-review) that includes a "(None)" sentinel. */
+interface OptionalPickerItem {
     none?: boolean;
     provider?: string;
     id?: string;
 }
-async function handleReviewerModelSelection(
+
+async function pickOptionalModel(
     ctx: ExtensionContext,
-    _pi: ExtensionAPI
+    title: string,
+    currentLabel: () => string,
+    _getter: () => { provider: string; id: string } | null,
+    setter: (val: { provider: string; id: string } | null) => void,
+    disabledMsg: string,
+    setMsgTemplate: (providerId: string) => string
 ): Promise<void> {
     try {
         const availableModels = await ctx.modelRegistry.getAvailable();
         if (availableModels.length === 0) {
-            // No models available — only option is to disable
-            OrchestratorState.reviewerModel = null;
+            setter(null);
             persistSettings(OrchestratorState);
-            ctx.ui.notify("Plan review disabled (no models available).", "info");
+            ctx.ui.notify(disabledMsg, "info");
             return;
         }
 
-        // Build items with "(None)" at top, then all available models
-        const items: ReviewerPickerItem[] = [
+        const items: OptionalPickerItem[] = [
             { none: true },
             ...availableModels.map((m) => ({ provider: m.provider, id: m.id }))
         ];
 
-        const selected = await ctx.ui.custom<ReviewerPickerItem | null>(
+        const selected = await ctx.ui.custom<OptionalPickerItem | null>(
             (tui, theme, _keybindings, done) => {
                 const container = new Container();
-
-                // Top border
                 container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                // Title
-                container.addChild(new Text(theme.fg("accent", theme.bold("Select Plan Review Model")), 1, 0));
+                container.addChild(new Text(theme.fg("accent", theme.bold(title)), 1, 0));
                 container.addChild(new Text(
-                    theme.fg("muted", `Current: ${formatModel(OrchestratorState.reviewerModel) || "(disabled)"}`),
+                    theme.fg("muted", `Current: ${currentLabel()}`),
                     1, 0
                 ));
 
-                // Build display labels for the list
                 const displayItems: SelectItem[] = items.map((item, index) => {
                     if (item.none) {
-                        return { value: String(index), label: "(None) — disable plan review" };
+                        return { value: String(index), label: "(None) — disable" };
                     }
-                    return {
-                        value: String(index),
-                        label: `${item.provider}/${item.id}`
-                    };
+                    return { value: String(index), label: `${item.provider}/${item.id}` };
                 });
 
                 const selectList = new SelectList(displayItems, Math.min(displayItems.length, 18), {
@@ -575,11 +493,7 @@ async function handleReviewerModelSelection(
                 selectList.onCancel = () => done(null);
 
                 container.addChild(selectList);
-
-                // Help text
                 container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel"), 1, 0));
-
-                // Bottom border
                 container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
                 return {
@@ -597,18 +511,33 @@ async function handleReviewerModelSelection(
         if (!selected) return; // cancelled
 
         if (selected.none) {
-            OrchestratorState.reviewerModel = null;
+            setter(null);
             persistSettings(OrchestratorState);
-            ctx.ui.notify("Plan review disabled.", "info");
+            ctx.ui.notify(disabledMsg, "info");
         } else if (selected.provider && selected.id) {
-            OrchestratorState.reviewerModel = { provider: selected.provider, id: selected.id };
+            setter({ provider: selected.provider, id: selected.id });
             persistSettings(OrchestratorState);
-            ctx.ui.notify(`Plan review model set to ${selected.provider}/${selected.id}.`, "info");
+            ctx.ui.notify(setMsgTemplate(`${selected.provider}/${selected.id}`), "info");
         }
     } catch (err) {
-        notifyTuiOnly(OrchestratorState.pi, "Reviewer model picker error: " + String(err));
-        ctx.ui.notify(`Error opening reviewer model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
+        notifyTuiOnly(OrchestratorState.pi, `${title} picker error: ` + String(err));
+        ctx.ui.notify(`Error opening ${title.toLowerCase()} picker: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
+}
+
+async function handleReviewerModelSelection(
+    ctx: ExtensionContext,
+    _pi: ExtensionAPI
+): Promise<void> {
+    return pickOptionalModel(
+        ctx,
+        "Select Plan Review Model",
+        () => formatModel(OrchestratorState.reviewerModel) || "(disabled)",
+        () => OrchestratorState.reviewerModel,
+        (v) => { OrchestratorState.reviewerModel = v; },
+        "Plan review disabled.",
+        (pid) => `Plan review model set to ${pid}.`
+);
 }
 
 /**
@@ -740,7 +669,7 @@ async function handleTimeoutInput(
         label,
         `Current: ${currentStr}`,
         ['Formats: "30s" | "5m" | "2m30s" | "0" (no timeout)\n'],
-        currentValueMs === 0 ? "0" : formatTimeoutShort(currentValueMs)
+        currentValueMs === 0 ? "0" : formatTimeoutCompact(currentValueMs)
     );
 
     if (result === null || result.trim() === "") return; // cancelled or empty
@@ -763,16 +692,7 @@ async function handleTimeoutInput(
     }
 }
 
-/** Format for the input field default - compact form. */
-function formatTimeoutShort(ms: number): string {
-    if (ms === 0) return "0";
-    const totalSeconds = Math.floor(ms / 1_000);
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    if (minutes > 0 && seconds > 0) return `${minutes}m${seconds}s`;
-    if (minutes > 0) return `${minutes}m`;
-    return `${seconds}s`;
-}
+
 
 /** Human-readable label for a timeout scope. */
 function getTimeoutLabel(scope: "task" | "validator" | "taskSummary"): string {
@@ -806,7 +726,7 @@ async function handleSubAgentIdleTimeoutInput(ctx: ExtensionContext): Promise<vo
         "Sub-agent idle timeout",
         `Current: ${currentStr}`,
         ['Formats: "30s" | "5m" | "2m30s" | "0" (no limit)\n'],
-        OrchestratorState.subAgentIdleTimeoutMs === 0 ? "0" : formatTimeoutShort(OrchestratorState.subAgentIdleTimeoutMs)
+        OrchestratorState.subAgentIdleTimeoutMs === 0 ? "0" : formatTimeoutCompact(OrchestratorState.subAgentIdleTimeoutMs)
     );
 
     if (result === null || result.trim() === "") return; // cancelled or empty
@@ -824,94 +744,18 @@ async function handleSubAgentIdleTimeoutInput(ctx: ExtensionContext): Promise<vo
 /**
  * Open a custom code-review model picker that includes a "(None)" sentinel option.
  */
-interface CodeReviewPickerItem {
-    none?: boolean;
-    provider?: string;
-    id?: string;
-}
 async function handleCodeReviewModelSelection(
     ctx: ExtensionContext,
     _pi: ExtensionAPI
 ): Promise<void> {
-    try {
-        const availableModels = await ctx.modelRegistry.getAvailable();
-        if (availableModels.length === 0) {
-            OrchestratorState.codeReviewModel = null;
-            persistSettings(OrchestratorState);
-            ctx.ui.notify("Code review disabled (no models available).", "info");
-            return;
-        }
-
-        const items: CodeReviewPickerItem[] = [
-            { none: true },
-            ...availableModels.map((m) => ({ provider: m.provider, id: m.id }))
-        ];
-
-        const selected = await ctx.ui.custom<CodeReviewPickerItem | null>(
-            (tui, theme, _keybindings, done) => {
-                const container = new Container();
-
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                container.addChild(new Text(theme.fg("accent", theme.bold("Select Code Review Model")), 1, 0));
-                container.addChild(new Text(
-                    theme.fg("muted", `Current: ${formatModel(OrchestratorState.codeReviewModel) || "(disabled)"}`),
-                    1, 0
-                ));
-
-                const displayItems: SelectItem[] = items.map((item, index) => {
-                    if (item.none) {
-                        return { value: String(index), label: "(None) — disable code review" };
-                    }
-                    return {
-                        value: String(index),
-                        label: `${item.provider}/${item.id}`
-                    };
-                });
-
-                const selectList = new SelectList(displayItems, Math.min(displayItems.length, 18), {
-                    selectedPrefix: (t) => theme.fg("accent", t),
-                    selectedText: (t) => theme.fg("accent", t),
-                    description: (t) => theme.fg("muted", t),
-                    scrollInfo: (t) => theme.fg("dim", t),
-                    noMatch: (t) => theme.fg("warning", t)
-                });
-
-                selectList.onSelect = (item) => {
-                    const idx = parseInt(item.value, 10);
-                    done(items[idx] || null);
-                };
-                selectList.onCancel = () => done(null);
-
-                container.addChild(selectList);
-                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel"), 1, 0));
-                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                return {
-                    render: (w) => container.render(w),
-                    invalidate: () => container.invalidate(),
-                    handleInput: (data) => {
-                        selectList.handleInput(data);
-                        tui.requestRender();
-                    }
-                };
-            },
-            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 2 } }
-        );
-
-        if (!selected) return;
-
-        if (selected.none) {
-            OrchestratorState.codeReviewModel = null;
-            persistSettings(OrchestratorState);
-            ctx.ui.notify("Code review disabled.", "info");
-        } else if (selected.provider && selected.id) {
-            OrchestratorState.codeReviewModel = { provider: selected.provider, id: selected.id };
-            persistSettings(OrchestratorState);
-            ctx.ui.notify(`Code review model set to ${selected.provider}/${selected.id}.`, "info");
-        }
-    } catch (err) {
-        notifyTuiOnly(OrchestratorState.pi, "Code reviewer model picker error: " + String(err));
-        ctx.ui.notify(`Error opening code reviewer model picker: ${err instanceof Error ? err.message : String(err)}`, "error");
-    }
+    return pickOptionalModel(
+        ctx,
+        "Select Code Review Model",
+        () => formatModel(OrchestratorState.codeReviewModel) || "(disabled)",
+        () => OrchestratorState.codeReviewModel,
+        (v) => { OrchestratorState.codeReviewModel = v; },
+        "Code review disabled.",
+        (pid) => `Code review model set to ${pid}.`
+    );
 }
+

@@ -1,14 +1,11 @@
-import { StateManager } from "../context/state-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
-import { getCurrentOrchestrationState, isPlanningMode, isActive as stateIsActive } from "../core/state-machine";
+import { isPlanningMode, isActive as stateIsActive } from "../core/state-machine";
 import {
     detectCycle,
     detectFileConflicts,
     detectOversizedTasks,
     formatFileConflictError,
-    getDependents,
-    autoHealFileConflicts,
-    healDependenciesOnDelete
+    autoHealFileConflicts
 } from "../validation/validation";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
@@ -137,20 +134,7 @@ export async function validateEditTask(existingTaskIds: Set<string>, newDependen
     }
 }
 
-/**
- * Validates that deleting a task won't silently orphan other tasks.
- *
- * If any remaining tasks depend on the one being deleted, throws an error.
- * The caller must either add remediation tasks first or edit dependent tasks
- * to remove the dependency before deletion is allowed.
- */
-export function validateDeleteTask(plan: any, taskId: string): void {
-    // Replaced by automated dependency auto-healing cascading bypass
-}
 
-// ---------------------------------------------------------------------------
-// Mode guards (shared across tool modules)
-// ---------------------------------------------------------------------------
 
 /** Reject task manipulation during planning mode. */
 export function requireExecutionMode() {
@@ -161,23 +145,7 @@ export function requireExecutionMode() {
     }
 }
 
-export function requirePlanNotExecuting() {
-    const plan = StateManager.loadPlan();
-    if (!plan) throw new Error("No plan exists.");
-    
-    // Get current state from state machine
-    const currentState = getCurrentOrchestrationState();
-    
-    // Block task modification during active execution - orchestrator must call
-    // orchestrate_replan first to shift into recovery mode (planning state).
-    // Allowed in: planning, paused, verifying, code_review, plan_review, plan_reviewed.
-    const allowedStates: OrchestrationState[] = ["planning", "paused", "verifying", "code_review", "plan_review", "plan_reviewed"];
-    if (!allowedStates.includes(currentState)) {
-        throw new Error(
-            `Blocked during active execution (${currentState}). Call orchestrate_replan first to enter recovery mode.`
-        );
-    }
-}
+
 
 /** Clamp a per-task timeout: floor = configured default, ceiling = 2× default. */
 export function clampTaskTimeout(raw?: number): number {
@@ -196,16 +164,17 @@ export function isBuildTask(description: string): boolean {
 // Shared guard and guidance helpers (used by task-crud.ts / execution-control.ts)
 // ---------------------------------------------------------------------------
 
-/** Combined prerequisite check for task CRUD tools: isActive + exec mode + plan not executing. */
-/** Combined prerequisite check for task CRUD tools: isActive + exec mode + setup/replanning gating. */
+// ---------------------------------------------------------------------------
+// Mode guards (shared across tool modules)
+// ---------------------------------------------------------------------------
 export function requireTaskCrudPrereqs() {
     if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
     requireExecutionMode();
     
     const state = OrchestratorState.currentState;
-    if (state !== "setup" && state !== "replanning") {
+    if (state !== "setup" && state !== "replanning" && state !== "verifying") {
         throw new Error(
-            `Blocked: task modification (add, edit, delete, complete) is only allowed during 'setup' or 'replanning' states. Current state is '${state}'.`
+            `Blocked: task modification (add, edit, delete, complete) is only allowed during 'setup', 'replanning', or 'verifying' states. Current state is '${state}'.`
         );
     }
 }

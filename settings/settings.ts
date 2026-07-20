@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { safeWriteFile } from "../context/state-manager";
-import { OrchestratorState } from "../core";
+import { notifyTui as coreNotifyTui } from "../core";
 
 import {
     DEFAULT_TASK_TIMEOUT_MS,
@@ -12,16 +12,6 @@ import {
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_MAX_TURNS
 } from "../core/types";
-
-/** Fire TUI-only notification (non-fatal). */
-function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
-        try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
-    }
-}
 
 /** Keys that hold model references (nullable ModelRef). */
 const MODEL_KEYS = [
@@ -45,7 +35,7 @@ const TIMEOUT_KEYS = ["taskTimeoutMs", "validatorTimeoutMs", "taskSummaryTimeout
 const LIMIT_KEYS = ["subAgentMaxTurns"] as const;
 
 /** Keys that hold boolean behaviour flags. */
-const BOOL_KEYS = ["allowStopTool", "validateSimpleTasks", "validateComplexTasks"] as const;
+const BOOL_KEYS = ["allowStopTool", "validateSimpleTasks", "validateComplexTasks", "debugLogTransitions"] as const;
 
 /** All configurable setting keys (union of the above groups). */
 type SettingKey =
@@ -78,6 +68,7 @@ interface OrchestrationSettings {
     allowStopTool?: boolean;
     validateSimpleTasks?: boolean;
     validateComplexTasks?: boolean;
+    debugLogTransitions?: boolean;
 }
 
 /** Path to project-local settings (checked first). */
@@ -99,7 +90,7 @@ function loadFile(p: string): OrchestrationSettings {
         const data = fs.readFileSync(p, "utf-8");
         return JSON.parse(data) as OrchestrationSettings;
     } catch (e) {
-        notifyTui(`Failed to parse ${p}: ${String(e)}`);
+        coreNotifyTui(`Failed to parse ${p}: ${String(e)}`);
         return {};
     }
 }
@@ -227,6 +218,7 @@ export function resetToDefaults(state: Record<SettingKey, unknown>): Orchestrati
     state.allowStopTool = true;
     state.validateSimpleTasks = false;
     state.validateComplexTasks = true;
+    state.debugLogTransitions = false;
 
     return effective;
 }
@@ -287,7 +279,8 @@ export function persistSettings(state: Record<SettingKey, unknown>): void {
     const boolDefaults: Array<{ key: (typeof BOOL_KEYS)[number]; defaultValue: boolean }> = [
         { key: "allowStopTool", defaultValue: true },
         { key: "validateSimpleTasks", defaultValue: false },
-        { key: "validateComplexTasks", defaultValue: true }
+        { key: "validateComplexTasks", defaultValue: true },
+        { key: "debugLogTransitions", defaultValue: false }
     ];
     for (const { key, defaultValue } of boolDefaults) {
         const value = state[key] as boolean;
@@ -301,5 +294,3 @@ export function persistSettings(state: Record<SettingKey, unknown>): void {
     saveProjectSettings(settings);
 }
 
-/** @deprecated Renamed to {@link persistSettings}. Will be removed in a future version. */
-export const persistModels = persistSettings;
