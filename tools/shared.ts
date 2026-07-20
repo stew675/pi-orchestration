@@ -166,7 +166,7 @@ export function requirePlanNotExecuting() {
     if (!plan) throw new Error("No plan exists.");
     
     // Get current state from state machine
-    const currentState = getCurrentOrchestrationState(plan);
+    const currentState = getCurrentOrchestrationState();
     
     // Block task modification during active execution - orchestrator must call
     // orchestrate_replan first to shift into recovery mode (planning state).

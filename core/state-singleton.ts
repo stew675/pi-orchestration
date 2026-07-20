@@ -591,9 +591,9 @@ export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLA
  * Uses the state machine to derive the current state from OrchestratorState.
  * Returns null when not in an execution-like state (planning mode or inactive).
  */
-export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPhaseLabel | null {
+export function computeExecutionPhaseLabel(): ExecutionPhaseLabel | null {
     // Get canonical state from state machine
-    const state = getCurrentOrchestrationState(plan);
+    const state = getCurrentOrchestrationState();
 
     // Map state to phase label
     const stateToPhase: Record<OrchestrationState, ExecutionPhaseLabel | null> = {
@@ -614,6 +614,15 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
     };
 
     return stateToPhase[state] ?? null;
+}
+
+/** Derive a granular phase label accounting for pause reason (stop → STOPPED). */
+export function resolveDisplayPhaseLabel(): ExecutionPhaseLabel | null {
+    const label = computeExecutionPhaseLabel();
+    if (label === "PAUSED" && OrchestratorState._pauseReason === "stop") {
+        return "STOPPED";
+    }
+    return label;
 }
 
 /** Strip the `task_` prefix for display (label already says "Task:"). */
@@ -674,7 +683,7 @@ export function buildStatusSummary(plan: OrchestrationPlan): string {
     if (isPlanningMode(state)) {
         parts.push(`Orchestration Status: planning`);
     } else if (isExecutingMode(state)) {
-        const phase = computeExecutionPhaseLabel(plan);
+        const phase = resolveDisplayPhaseLabel();
         const label = phase ? `${phase.toLowerCase()}` : plan.status;
         parts.push(`Orchestration Status: ${label}`);
     } else {

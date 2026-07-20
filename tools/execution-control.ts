@@ -131,7 +131,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             // Set current task and start implementing
-            if (getCurrentOrchestrationState(plan) !== "implementing") {
+            if (getCurrentOrchestrationState() !== "implementing") {
                 if (!transitionTo("implementing", plan)) {
                     throw new Error("Failed to transition to implementing state");
                 }
@@ -263,7 +263,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             // Ensure we're still in implementing state after resume
             const refreshedPlan = StateManager.loadPlan();
             if (refreshedPlan) {
-                const currentState = getCurrentOrchestrationState(refreshedPlan);
+                const currentState = getCurrentOrchestrationState();
                 if (currentState !== "implementing" && currentState !== "paused") {
                     transitionTo("implementing", refreshedPlan);
                 }

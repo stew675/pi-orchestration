@@ -6,7 +6,7 @@ import { StateManager, onPlanChange } from "../context/state-manager";
 import {
     OrchestratorState,
     buildStatusSummary,
-    computeExecutionPhaseLabel,
+    resolveDisplayPhaseLabel,
     stripTaskPrefix,
     truncateToSentence
 } from "../core";
@@ -70,7 +70,7 @@ function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     }
 
     // Get canonical state from state machine
-    const state = getCurrentOrchestrationState(plan);
+    const state = getCurrentOrchestrationState();
     const color: SemanticColor = STATE_COLORS[state] ?? "text";
 
     return OrchestratorState.theme.fg.bind(OrchestratorState.theme, color);
@@ -273,7 +273,7 @@ function buildPlanDisplay(
     const lines: string[] = [];
 
     // Header with status and goal
-    const phaseLabel = computeExecutionPhaseLabel(p);
+    const phaseLabel = resolveDisplayPhaseLabel();
     const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {
@@ -464,7 +464,7 @@ function buildTaskListView(
     const p = plan;
 
     // --- Header (label + goal + progress bar + phase detail messages) ---
-    const phaseLabel = computeExecutionPhaseLabel(p);
+    const phaseLabel = resolveDisplayPhaseLabel();
     const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {

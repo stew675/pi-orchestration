@@ -60,7 +60,7 @@ export const STATE_TRANSITIONS: Record<OrchestrationState, Array<OrchestrationSt
  * Current state of the orchestrator.
  * This is the single source of truth.
  */
-export function getCurrentOrchestrationState(_plan: OrchestrationPlan | null): OrchestrationState {
+export function getCurrentOrchestrationState(): OrchestrationState {
   return OrchestratorState.currentState;
 }
 

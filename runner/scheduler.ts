@@ -51,7 +51,7 @@ export async function runTasks(
             }
 
             // Get current state from state machine
-            const currentState = getCurrentOrchestrationState(plan);
+            const currentState = getCurrentOrchestrationState();
 
             // Hard stop for paused/failed plans
             if (currentState === "paused" || currentState === "failed") {

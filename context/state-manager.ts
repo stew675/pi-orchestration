@@ -445,7 +445,7 @@ export class StateManager {
         const primary = tryLoad(planPath);
         if (primary) {
             // Ensure plan status is consistent with current orchestration state
-            const currentState = getCurrentOrchestrationState(primary);
+            const currentState = getCurrentOrchestrationState();
             if (currentState !== "inactive") {
                 const expectedStatus = mapStateToPlanStatus(currentState);
                 if (primary.status !== expectedStatus) {
