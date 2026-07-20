@@ -6,8 +6,8 @@ import type { OrchestrationPlan } from "./types";
  *
  * - inactive: Extension not active (before /om-enable)
  * - planning: Building/editing plan
- * - reviewing: Plan under review (by reviewer model or user)
- * - reviewed: Plan approved, waiting for execution start
+ * - plan_review: Plan under review (by reviewer model or user)
+ * - plan_reviewed: Plan approved, waiting for execution start
  * - setup: Ready to create structured tasks after plan approval
  * - implementing: Actively running tasks
  * - replanning: Modifying tasks to recover from a failure
@@ -22,8 +22,8 @@ import type { OrchestrationPlan } from "./types";
 export type OrchestrationState =
   | "inactive"
   | "planning"
-  | "reviewing"
-  | "reviewed"
+  | "plan_review"
+  | "plan_reviewed"
   | "setup"
   | "implementing"
   | "replanning"
@@ -40,10 +40,10 @@ export type OrchestrationState =
  * Key: current state, Value: array of allowed next states.
  */
 export const STATE_TRANSITIONS: Record<OrchestrationState, Array<OrchestrationState>> = {
-  inactive: ["planning", "implementing", "setup", "replanning", "paused", "failed", "verifying", "completed", "code_review", "reviewing", "reviewed", "resuming"],
-  planning: ["reviewing", "setup", "inactive"],
-  reviewing: ["planning", "setup", "inactive"],
-  reviewed: ["setup", "inactive"],
+  inactive: ["planning", "implementing", "setup", "replanning", "paused", "failed", "verifying", "completed", "code_review", "plan_review", "plan_reviewed", "resuming"],
+  planning: ["plan_review", "setup", "inactive"],
+  plan_review: ["planning", "setup", "inactive"],
+  plan_reviewed: ["setup", "inactive"],
   setup: ["implementing", "inactive"],
   implementing: ["pausing", "paused", "failed", "verifying", "code_review", "replanning", "inactive"],
   replanning: ["implementing", "inactive"],
@@ -108,8 +108,8 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
   const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
     inactive: "planning", // fallback
     planning: "planning",
-    reviewing: "planning",
-    reviewed: "planning",
+    plan_review: "planning",
+    plan_reviewed: "planning",
     setup: "setup",
     implementing: "implementing",
     replanning: "replanning",
@@ -173,7 +173,7 @@ export function isActive(state: OrchestrationState): boolean {
 
 /** Orchestrator is in a planning-phase state (building or reviewing the plan). */
 export function isPlanningMode(state: OrchestrationState): boolean {
-  return state === "planning" || state === "reviewing" || state === "reviewed";
+  return state === "planning" || state === "plan_review" || state === "plan_reviewed";
 }
 
 /** Orchestrator is in an execution-phase state (any active implementation lifecycle state). */

@@ -97,7 +97,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
 
 
     // --- Top-level menu (category level) ---
-    const showTopMenu = () => {
+    const showTopMenu = (initialIndex: number = 0) => {
         return ctx.ui.custom<string | null>(
             (tui, theme, _kb, done) => {
                 const container = new Container();
@@ -107,8 +107,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 const topItems: SelectItem[] = [
                     { value: "models", label: "Models" },
                     { value: "execution", label: "Execution" },
-                    { value: "behavior", label: "Behavior" },
-                    { value: "reset-defaults", label: "Reset models to defaults" }
+                    { value: "behavior", label: "Behavior" }
                 ];
 
                 const selectList = new SelectList(topItems, Math.min(topItems.length, 18), {
@@ -118,6 +117,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                     scrollInfo: (t) => theme.fg("dim", t),
                     noMatch: (t) => theme.fg("warning", t)
                 });
+                selectList.setSelectedIndex(initialIndex);
                 selectList.onSelect = (item) => done(item.value);
                 selectList.onCancel = () => done(null);
                 container.addChild(selectList);
@@ -142,12 +142,13 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         return [
             { value: "orchestration-model", label: `Orchestration model (${formatModel(OrchestratorState.orchestrationModel)})` },
             { value: "planning-model", label: `Planning model (${formatModel(OrchestratorState.planningModel)})` },
+            { value: "reviewer-model", label: `Plan review model (${formatModel(OrchestratorState.reviewerModel) || "(disabled)"})` },
             { value: "simple-task-model", label: `Simple task model (${formatModel(OrchestratorState.simpleTaskModel)})` },
             { value: "complex-task-model", label: `Complex task model (${formatModel(OrchestratorState.complexTaskModel)})` },
-            { value: "validator-model", label: `Validator model (${formatModel(OrchestratorState.validatorModel)})` },
             { value: "summary-model", label: `Summary model (${formatModel(OrchestratorState.summaryModel)})` },
-            { value: "reviewer-model", label: `Plan review model (${formatModel(OrchestratorState.reviewerModel) || "(disabled)"})` },
-            { value: "code-review-model", label: `Code review model (${formatModel(OrchestratorState.codeReviewModel) || "(disabled)"})` }
+            { value: "code-review-model", label: `Code review model (${formatModel(OrchestratorState.codeReviewModel) || "(disabled)"})` },
+            { value: "validator-model", label: `Validator model (${formatModel(OrchestratorState.validatorModel)})` },
+            { value: "reset-defaults", label: "Reset models to defaults" }
         ];
     }
 
@@ -367,14 +368,20 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
     let lastExecChoice: string | null = null;
     let lastBehavChoice: string | null = null;
 
+    // Top-level category index map (matches topItems order).
+    const TOP_INDEX: Record<string, number> = { models: 0, execution: 1, behavior: 2 };
+    let lastTopCategory: string | null = null; // remember which category to restore cursor on
+
     while (true) {
-        const topChoice = await showTopMenu();
+        const prevTopIndex = lastTopCategory != null ? TOP_INDEX[lastTopCategory] ?? 0 : 0;
+        if (prevTopIndex > 0) lastTopCategory = null; // consumed
+        const topChoice = await showTopMenu(prevTopIndex);
         if (!topChoice) return; // escape - done
 
         // Category navigation — enter a sub-menu, then return here after each action.
         if (topChoice === "models") {
+            lastTopCategory = "models";
             while (true) {
-                // Remember which item to restore cursor on after rebuild.
                 const prevIndex = lastModelChoice != null
                     ? buildModelItems().findIndex(i => i.value === lastModelChoice)
                     : 0;
@@ -387,6 +394,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 if (handler) await handler();
             }
         } else if (topChoice === "execution") {
+            lastTopCategory = "execution";
             while (true) {
                 const prevIndex = lastExecChoice != null
                     ? buildExecutionItems().findIndex(i => i.value === lastExecChoice)
@@ -400,6 +408,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 if (handler) await handler();
             }
         } else if (topChoice === "behavior") {
+            lastTopCategory = "behavior";
             while (true) {
                 const prevIndex = lastBehavChoice != null
                     ? buildBehaviorItems().findIndex(i => i.value === lastBehavChoice)
@@ -412,10 +421,6 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 const handler = choiceHandlers[behavChoice];
                 if (handler) await handler();
             }
-        } else {
-            // Direct action from top level (e.g. reset-defaults)
-            const handler = choiceHandlers[topChoice];
-            if (handler) await handler();
         }
     }
 }

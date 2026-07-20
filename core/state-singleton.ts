@@ -584,7 +584,7 @@ export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
 }
 
 /** Granular execution phase labels for the TUI status display. */
-export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "REVIEWING" | "COMPLETED" | "FAILED";
+export type ExecutionPhaseLabel = "PLANNING" | "SETUP" | "IMPLEMENTING" | "REPLANNING" | "PAUSED" | "STOPPED" | "VERIFYING" | "PLAN_REVIEW" | "CODE_REVIEW" | "COMPLETED" | "FAILED";
 
 /**
  * Compute a granular execution phase label for display.
@@ -599,8 +599,8 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
     const stateToPhase: Record<OrchestrationState, ExecutionPhaseLabel | null> = {
         inactive: null,
         planning: "PLANNING",
-        reviewing: "REVIEWING",
-        reviewed: "PLANNING",
+        plan_review: "PLAN_REVIEW",
+        plan_reviewed: "PLANNING",
         setup: "SETUP",
         implementing: "IMPLEMENTING",
         replanning: "REPLANNING",
@@ -610,7 +610,7 @@ export function computeExecutionPhaseLabel(plan: OrchestrationPlan): ExecutionPh
         failed: "FAILED",
         completed: "COMPLETED",
         verifying: "VERIFYING",
-        code_review: "REVIEWING",
+        code_review: "CODE_REVIEW",
     };
 
     return stateToPhase[state] ?? null;

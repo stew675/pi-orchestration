@@ -14,8 +14,8 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
     const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
         inactive: "planning",
         planning: "planning",
-        reviewing: "planning",
-        reviewed: "planning",
+        plan_review: "planning",
+        plan_reviewed: "planning",
         setup: "setup",
         implementing: "implementing",
         replanning: "replanning",

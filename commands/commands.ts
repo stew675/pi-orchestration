@@ -102,7 +102,7 @@ function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
     // Re-run the code review sub-agent. If it fails again, fall through to normal review.
     sendResumeMessage(
         pi,
-        `System: Resuming from REVIEWING state. Code review was interrupted — re-running automated code review.`
+        `System: Resuming from CODE_REVIEW state. Code review was interrupted — re-running automated code review.`
     );
 
     // Set status back so the runner can pick up the code-review flow via finishPlan
@@ -205,7 +205,7 @@ function resumePlanExecution(_stalePlan: unknown, pi: ExtensionAPI) {
 
     const handlers: Record<string, (p: OrchestrationPlan, pi: ExtensionAPI) => void> = {
         verifying: handleResumeReview,
-        reviewing: handleResumeReview,
+        plan_review: handleResumeReview,
         code_review: handleResumeCodeReview,
         reviewing_code: handleResumeCodeReview,
         implementing: handleResumeExecutingOrPaused,

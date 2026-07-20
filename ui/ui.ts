@@ -135,8 +135,8 @@ interface PlanDisplayOptions {
 const STATE_COLORS: Record<OrchestrationState, SemanticColor> = {
     inactive: "text",
     planning: "mdHeading",
-    reviewing: "borderAccent",
-    reviewed: "mdHeading",
+    plan_review: "borderAccent",
+    plan_reviewed: "mdHeading",
     setup: "warning",
     implementing: "success",
     replanning: "warning",
@@ -156,7 +156,8 @@ const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
     IMPLEMENTING: "success",
     REPLANNING: "warning",
     VERIFYING: "accent",
-    REVIEWING: "borderAccent",
+    PLAN_REVIEW: "borderAccent",
+    CODE_REVIEW: "borderAccent",
     PAUSED: "warning",
     STOPPED: "error",
     COMPLETED: "border",
@@ -182,7 +183,11 @@ const PHASE_DETAIL_RENDERERS: Record<
         lines.push(t.fg("warning", "  -> Awaiting final verification by orchestrator"));
         lines.push(t.fg("dim", "  Use /om-resume to wake the reviewer if nothing happens"));
     },
-    REVIEWING: (lines, _plan, t) => {
+    PLAN_REVIEW: (lines, _plan, t) => {
+        lines.push(t.fg("warning", "  -> Plan review in progress"));
+        lines.push(t.fg("dim", "  Reviewer model is evaluating the implementation plan"));
+    },
+    CODE_REVIEW: (lines, _plan, t) => {
         lines.push(t.fg("warning", "  -> Code review in progress or actions required"));
         lines.push(t.fg("dim", "  Read .pi/orchestration/plans/code-review.md for findings"));
     },
