@@ -88,7 +88,7 @@ export function transitionTo(newState: OrchestrationState, plan?: OrchestrationP
   }
 
   // Uncomment the following line to see all state transitions in the TUI
-  notifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
+  // notifyTui(`[state-machine] State transition: ${currentState} → ${newState}`);
 
   // Update OrchestratorState.currentState directly as the single source of truth
   OrchestratorState.currentState = newState;
