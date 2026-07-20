@@ -12,7 +12,8 @@ import type { OrchestrationPlan } from "./types";
  * - implementing: Actively running tasks
  * - replanning: Modifying tasks to recover from a failure
  * - pausing: Graceful pause requested, letting current task(s) finish
- * - paused: User-initiated pause (graceful or stop)
+ * - paused: User-initiated graceful pause
+ * - stopped: Immediate halt (/om-stop or orchestrate_stop)
  * - resuming: Resuming from pause/crash
  * - failed: Task failed, awaiting recovery
  * - verifying: All tasks done, awaiting orchestrate_approve_goal
@@ -29,6 +30,7 @@ export type OrchestrationState =
   | "replanning"
   | "pausing"
   | "paused"
+  | "stopped"
   | "resuming"
   | "failed"
   | "verifying"
@@ -40,20 +42,21 @@ export type OrchestrationState =
  * Key: current state, Value: array of allowed next states.
  */
 export const STATE_TRANSITIONS: Record<OrchestrationState, Array<OrchestrationState>> = {
-  inactive: ["planning", "implementing", "setup", "replanning", "paused", "failed", "verifying", "completed", "code_review", "plan_review", "plan_reviewed", "resuming"],
+  inactive: ["planning", "implementing", "setup", "replanning", "paused", "stopped", "failed", "verifying", "completed", "code_review", "plan_review", "plan_reviewed", "resuming"],
   planning: ["plan_review", "setup", "inactive"],
   plan_review: ["planning", "setup", "inactive"],
   plan_reviewed: ["setup", "inactive"],
-  setup: ["implementing", "inactive"],
-  implementing: ["pausing", "paused", "failed", "verifying", "code_review", "replanning", "inactive"],
+  setup: ["implementing", "stopped", "inactive"],
+  implementing: ["pausing", "paused", "stopped", "failed", "verifying", "code_review", "replanning", "inactive"],
   replanning: ["implementing", "inactive"],
   pausing: ["paused", "failed", "inactive"],
   paused: ["implementing", "failed", "replanning", "inactive"],
+  stopped: ["implementing", "replanning", "inactive"],
   resuming: ["implementing", "failed", "inactive"],
   failed: ["replanning", "implementing", "inactive"],
   verifying: ["completed", "inactive"],
   completed: ["planning", "inactive"],
-  code_review: ["implementing", "verifying", "failed", "inactive"],
+  code_review: ["implementing", "verifying", "stopped", "failed", "inactive"],
 };
 
 /**
@@ -115,6 +118,7 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
     replanning: "replanning",
     pausing: "pausing",
     paused: "paused",
+    stopped: "paused",
     resuming: "implementing",
     failed: "failed",
     completed: "completed",
@@ -179,7 +183,7 @@ export function isPlanningMode(state: OrchestrationState): boolean {
 /** Orchestrator is in an execution-phase state (any active implementation lifecycle state). */
 export function isExecutingMode(state: OrchestrationState): boolean {
   const executingStates: OrchestrationState[] = [
-    "setup", "replanning", "implementing", "pausing", "paused",
+    "setup", "replanning", "implementing", "pausing", "paused", "stopped",
     "resuming", "failed", "verifying", "code_review"
   ];
   return executingStates.includes(state);

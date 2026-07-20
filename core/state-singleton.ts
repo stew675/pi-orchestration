@@ -65,8 +65,6 @@ export const OrchestratorState = {
     _pendingReviewCompletion: false,
     /** Set to true when user explicitly pauses/stops. Disables the watchdog. */
     _manualPause: false,
-    /** Reason for manual pause: 'pause' (/om-pause), 'stop' (/om-stop), or null (system/system-triggered pause) */
-    _pauseReason: null as "pause" | "stop" | null,
 
     // --- Configurable behaviour ---
     allowStopTool: true, // when false, orchestrate_stop returns a nudge instead of halting
@@ -174,7 +172,6 @@ const STATE_DEFAULTS = {
     _pendingReviewStart: false,
     _pendingReviewCompletion: false,
     _manualPause: false,
-    _pauseReason: null as "pause" | "stop" | null,
     allowStopTool: true,
     validateSimpleTasks: false,
     validateComplexTasks: true,
@@ -606,6 +603,7 @@ export function computeExecutionPhaseLabel(): ExecutionPhaseLabel | null {
         replanning: "REPLANNING",
         pausing: "PAUSED",
         paused: "PAUSED",
+        stopped: "STOPPED",
         resuming: "IMPLEMENTING",
         failed: "FAILED",
         completed: "COMPLETED",
@@ -614,15 +612,6 @@ export function computeExecutionPhaseLabel(): ExecutionPhaseLabel | null {
     };
 
     return stateToPhase[state] ?? null;
-}
-
-/** Derive a granular phase label accounting for pause reason (stop → STOPPED). */
-export function resolveDisplayPhaseLabel(): ExecutionPhaseLabel | null {
-    const label = computeExecutionPhaseLabel();
-    if (label === "PAUSED" && OrchestratorState._pauseReason === "stop") {
-        return "STOPPED";
-    }
-    return label;
 }
 
 /** Strip the `task_` prefix for display (label already says "Task:"). */
@@ -683,7 +672,7 @@ export function buildStatusSummary(plan: OrchestrationPlan): string {
     if (isPlanningMode(state)) {
         parts.push(`Orchestration Status: planning`);
     } else if (isExecutingMode(state)) {
-        const phase = resolveDisplayPhaseLabel();
+        const phase = computeExecutionPhaseLabel();
         const label = phase ? `${phase.toLowerCase()}` : plan.status;
         parts.push(`Orchestration Status: ${label}`);
     } else {

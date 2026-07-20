@@ -44,7 +44,6 @@ export {
     formatModel,
     recoverInterruptedTasks,
     computeExecutionPhaseLabel,
-    resolveDisplayPhaseLabel,
     stripTaskPrefix,
     truncateToSentence,
     buildStatusSummary,

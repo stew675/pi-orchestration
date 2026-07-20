@@ -319,14 +319,13 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             OrchestratorState._manualPause = true;
-            OrchestratorState._pauseReason = "stop";
 
             killAllProcesses("SIGKILL");
 
             const plan = StateManager.loadPlan();
             if (plan) {
-                if (!transitionTo("paused", plan)) {
-                    notifyTuiOnly(pi, "Failed to transition to paused state on stop");
+                if (!transitionTo("stopped", plan)) {
+                    notifyTuiOnly(pi, "Failed to transition to stopped state on stop");
                 }
                 StateManager.savePlan(plan);
             }

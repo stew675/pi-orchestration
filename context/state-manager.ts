@@ -21,6 +21,7 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
         replanning: "replanning",
         pausing: "pausing",
         paused: "paused",
+        stopped: "paused",
         resuming: "implementing",
         failed: "failed",
         completed: "completed",
