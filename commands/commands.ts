@@ -268,7 +268,6 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
         await enterOrchestrationMode(pi, ctx);
         setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
         OrchestratorState.shouldResetContext = true;
-        OrchestratorState._manualPause = false;
 
         // Recover interrupted tasks
         const recovered = recoverInterruptedTasks(plan);
@@ -448,7 +447,6 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     // Exit planning mode (restore pre-planning model if one was captured)
     await exitPlanningMode(pi, ctx);
     OrchestratorState.shouldResetContext = true;
-    OrchestratorState._manualPause = false;
     // Clear planning hint flags — no longer in planning
     OrchestratorState._preWriteHintSent = false;
 
@@ -645,7 +643,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Gracefully pause orchestration (lets current task finish)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            OrchestratorState._manualPause = true;
             const plan = StateManager.loadPlan();
             if (plan && plan.status === "implementing") {
                 // Graceful pause: set status to 'pausing' so the Runner finishes
@@ -685,7 +682,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 ctx.ui.notify("No orchestration plan found. Describe a goal or plan with the agent.", "warning");
                 return;
             }
-            OrchestratorState._manualPause = false;
 
             if (plan.status === "completed") {
                 ctx.ui.notify(
@@ -719,7 +715,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Immediately stop all running sub-agents (can be resumed later)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            OrchestratorState._manualPause = true;
             const plan = StateManager.loadPlan();
             if (!plan) {
                 ctx.ui.notify("No active orchestration plan.", "warning");
@@ -749,7 +744,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
                 StateManager.clearPlan();
                 await exitPlanningMode(pi, ctx);
-                OrchestratorState._manualPause = false;
                 OrchestratorState._inReviewPhase = false;
                 setOrchestrationMode("planning", pi, refreshBorder);
                 ctx.ui.notify("Orchestration plan cleared. Describe a new goal to start planning.", "info");

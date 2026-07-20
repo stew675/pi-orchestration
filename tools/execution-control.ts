@@ -318,8 +318,6 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 };
             }
 
-            OrchestratorState._manualPause = true;
-
             killAllProcesses("SIGKILL");
 
             const plan = StateManager.loadPlan();

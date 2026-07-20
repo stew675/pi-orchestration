@@ -22,9 +22,12 @@ import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, 
  * (e.g., `isActive(OrchestratorState.currentState)`).
  */
 export const OrchestratorState = {
+    // --- Current Orchestration Extention State ---
     currentState: "inactive" as OrchestrationState,
     pi: undefined as ExtensionAPI | undefined,
     theme: null as Theme | null,
+
+    // --- Configured Models ---
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
     summaryModel: null as ModelRef | null,
@@ -33,9 +36,26 @@ export const OrchestratorState = {
     planningModel: null as ModelRef | null,
     reviewerModel: null as ModelRef | null,
     codeReviewModel: null as ModelRef | null,
+
+    // --- Concurrency controls ---
     summarizationConcurrency: 0,
     parallelTasks: 1,
-    shuttingDown: false,
+
+    // --- Configurable behaviour ---
+    allowStopTool: true, // when false, orchestrate_stop returns a nudge instead of halting
+    validateSimpleTasks: false, // validation for simple tasks (default off)
+    validateComplexTasks: true, // validation for complex tasks (default on)
+
+    // --- Configurable timeouts (milliseconds; 0 = no timeout) ---
+    taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS, // default watchdog for sub-agent tasks (12 min)
+    validatorTimeoutMs: DEFAULT_VALIDATOR_TIMEOUT_MS, // default watchdog for validation agents (4 min)
+    taskSummaryTimeoutMs: DEFAULT_SUMMARY_TIMEOUT_MS, // default watchdog for task summary agents (2 min)
+
+    // --- Global sub-agent limits ---
+    subAgentIdleTimeoutMs: DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS, // idle timeout for any sub-agent (5m30s; 0 = disabled)
+    subAgentMaxTurns: DEFAULT_SUB_AGENT_MAX_TURNS, // max model turns for any sub-agent (30; 0 = unlimited)
+
+    // --- Dynamic/Temporary Inter/Intra-State values ---
     /** Original main model captured when entering orchestration mode - restored on exit. */
     originalMainModel: undefined as ModelRef | undefined,
     /** Model active before entering planning mode (orchestration or main) - restored when exiting planning. */
@@ -63,22 +83,8 @@ export const OrchestratorState = {
     _pendingReviewStart: false,
     /** One-shot flag: reviewer is scheduled to complete and switch back on agent_settled. */
     _pendingReviewCompletion: false,
-    /** Set to true when user explicitly pauses/stops. Disables the watchdog. */
-    _manualPause: false,
-
-    // --- Configurable behaviour ---
-    allowStopTool: true, // when false, orchestrate_stop returns a nudge instead of halting
-    validateSimpleTasks: false, // validation for simple tasks (default off)
-    validateComplexTasks: true, // validation for complex tasks (default on)
-
-    // --- Configurable timeouts (milliseconds; 0 = no timeout) ---
-    taskTimeoutMs: DEFAULT_TASK_TIMEOUT_MS, // default watchdog for sub-agent tasks (12 min)
-    validatorTimeoutMs: DEFAULT_VALIDATOR_TIMEOUT_MS, // default watchdog for validation agents (4 min)
-    taskSummaryTimeoutMs: DEFAULT_SUMMARY_TIMEOUT_MS, // default watchdog for task summary agents (2 min)
-
-    // --- Global sub-agent limits ---
-    subAgentIdleTimeoutMs: DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS, // idle timeout for any sub-agent (5m30s; 0 = disabled)
-    subAgentMaxTurns: DEFAULT_SUB_AGENT_MAX_TURNS // max model turns for any sub-agent (30; 0 = unlimited)
+    /** Flag to prevent writing stale data to disk while shutting the orchestration mode down */
+    shuttingDown: false
 };
 
 /** Global idle timeout for any sub-agent — no JSON stream activity (milliseconds; 0 = disabled). */
@@ -171,7 +177,6 @@ const STATE_DEFAULTS = {
     _incorporatingFeedback: false,
     _pendingReviewStart: false,
     _pendingReviewCompletion: false,
-    _manualPause: false,
     allowStopTool: true,
     validateSimpleTasks: false,
     validateComplexTasks: true,
