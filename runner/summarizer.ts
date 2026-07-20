@@ -6,7 +6,7 @@ import { StateManager } from "../context/state-manager";
 import { spawnAgent } from "../process/process-manager";
 import { savePlanSafely, notifyTuiOnly } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
-import { transitionTo, getCurrentOrchestrationState } from "../core/state-machine";
+
 
 // ---------------------------------------------------------------------------
 // Pending summaries tracking - allows plan completion to await all in-flight
@@ -216,15 +216,6 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     const summaryText =
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
     t.result = { ...(t.result || {}), summary: summaryText };
-
-    // Transition to verifying state if all tasks are completed
-    const currentState = getCurrentOrchestrationState(p);
-    const allCompleted = p.tasks.every((t) => t.status === "completed");
-    if (allCompleted && currentState === "implementing") {
-        if (!transitionTo("verifying", p)) {
-            notifyTuiOnly(OrchestratorState.pi, "Failed to transition to verifying state after all tasks completed");
-        }
-    }
 
     savePlanSafely(p);
 
