@@ -1,5 +1,5 @@
 import { OrchestratorState, notifyTui as coreNotifyTui } from "./state-singleton";
-import type { OrchestrationPlan } from "./types";
+import type { Task } from "./types";
 
 /**
  * Well-defined orchestration states.
@@ -72,9 +72,9 @@ export function getCurrentOrchestrationState(): OrchestrationState {
 /**
  * State transition function with validation.
  * Returns true if transition was successful, false if invalid.
- * Updates OrchestratorState.currentState and maps plan.status to match.
+ * Updates OrchestratorState.currentState.
  */
-export function transitionTo(newState: OrchestrationState, plan?: OrchestrationPlan, force = false): boolean {
+export function transitionTo(newState: OrchestrationState, force = false): boolean {
   const currentState = OrchestratorState.currentState;
 
   if (!force && !STATE_TRANSITIONS[currentState].includes(newState)) {
@@ -89,66 +89,42 @@ export function transitionTo(newState: OrchestrationState, plan?: OrchestrationP
   // Update OrchestratorState.currentState directly as the single source of truth
   OrchestratorState.currentState = newState;
 
-  // Update plan status to match as a projection of currentState
-  if (plan) {
-    plan.status = mapStateToPlanStatus(newState);
-  }
-
   return true;
 }
 
 /**
- * Map orchestration state to plan.json status field.
+ * Infer the OrchestrationState when resuming based on the state of tasks.
  */
-export function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["status"] {
-  const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
-    inactive: "planning", // fallback
-    planning: "planning",
-    plan_review: "planning",
-    plan_reviewed: "planning",
-    setup: "setup",
-    implementing: "implementing",
-    replanning: "replanning",
-    pausing: "pausing",
-    paused: "paused",
-    stopped: "paused",
-    resuming: "implementing",
-    failed: "failed",
-    completed: "completed",
-    verifying: "verifying",
-    code_review: "code_review",
-  };
-  return mapping[state];
-}
-
-/**
- * Map plan status to orchestration state.
- */
-export function mapPlanStatusToState(status: OrchestrationPlan["status"]): OrchestrationState {
-  switch (status) {
-    case "planning":
-      return "planning";
-    case "setup":
-      return "setup";
-    case "implementing":
-      return "resuming";
-    case "replanning":
-      return "replanning";
-    case "pausing":
-      return "resuming";
-    case "paused":
-      return "resuming";
-    case "verifying":
-      return "verifying";
-    case "completed":
-      return "completed";
-    case "failed":
-      return "failed";
-    case "code_review":
-      return "code_review";
-    default:
-      return "planning";
+export function inferStateFromTasks(tasks: Task[]): OrchestrationState {
+  if (!tasks || tasks.length === 0) {
+    return "planning";
   }
+
+  // If any task is failed, resume in 'failed' so the user/orchestrator can replan
+  if (tasks.some((t) => t.status === "failed")) {
+    return "failed";
+  }
+
+  // If all tasks are completed, the plan is completed
+  if (tasks.every((t) => t.status === "completed")) {
+    return "completed";
+  }
+
+  // If there is any active/completed task, resume as 'implementing'
+  const activeOrDone = tasks.some(
+    (t) =>
+      t.status === "running" ||
+      t.status === "validating" ||
+      t.status === "summarizing" ||
+      t.status === "awaiting_clarification" ||
+      t.status === "completed"
+  );
+  if (activeOrDone) {
+    return "implementing";
+  }
+
+  // Default to implementing
+  return "implementing";
 }
 
 // ---------------------------------------------------------------------------

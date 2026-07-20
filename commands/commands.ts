@@ -22,7 +22,7 @@ import { openSettingsMenu } from "../settings/settings-menu";
 import { AcceptOrEditDialog } from "../ui/accept-or-edit-dialog";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { transitionTo, mapPlanStatusToState } from "../core/state-machine";
+import { transitionTo, inferStateFromTasks } from "../core/state-machine";
 
 /**
  * Enter orchestration mode: capture current model, optionally switch to
@@ -90,14 +90,14 @@ function sendResumeMessage(pi: ExtensionAPI, content: string) {
     );
 }
 
-function handleResumeReview(_plan: OrchestrationPlan, pi: ExtensionAPI) {
+function handleResumeReview(pi: ExtensionAPI) {
     sendResumeMessage(
         pi,
         `System: Resuming from review state. All tasks completed. Inspect the project files and verify they satisfy the original goal. If deficiencies exist, use orchestrate_add_task to add remediation tasks. If everything meets the goal, call orchestrate_approve_goal to finish.`
     );
 }
 
-function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
+function handleResumeCodeReview(pi: ExtensionAPI) {
     // Resuming from code-review phase (reviewing_code).
     // Re-run the code review sub-agent. If it fails again, fall through to normal review.
     sendResumeMessage(
@@ -107,17 +107,21 @@ function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
 
     // Set status back so the runner can pick up the code-review flow via finishPlan
     if (OrchestratorState.currentState !== "implementing") {
-        if (!transitionTo("implementing", plan)) {
+        if (!transitionTo("implementing")) {
             notifyTuiOnly(pi, "Failed to transition to implementing state on code review resume");
         }
     }
-    StateManager.savePlan(plan);
+    if (OrchestratorState.plan) {
+        StateManager.savePlan(OrchestratorState.plan);
+    }
     Runner.runTasks(pi).catch((err: Error) => {
         notifyTuiOnly(pi, "Code review resume error: " + String(err));
     });
 }
 
-function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI) {
+function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
+    const plan = OrchestratorState.plan;
+    if (!plan) return;
     const clarifyingTask = (plan.tasks || []).find((t: Task) => t.status === "awaiting_clarification");
     if (clarifyingTask) {
         sendResumeMessage(
@@ -131,7 +135,7 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
     if (!next) {
         if (OrchestratorState.codeReviewModel) {
             if (OrchestratorState.currentState !== "implementing") {
-                if (!transitionTo("implementing", plan)) {
+                if (!transitionTo("implementing")) {
                     notifyTuiOnly(pi, "Failed to transition to implementing state on resume (code review model)");
                 }
             }
@@ -140,10 +144,10 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
             return;
         }
         if (OrchestratorState.currentState === "paused") {
-            transitionTo("implementing", plan);
+            transitionTo("implementing");
         }
         if (OrchestratorState.currentState === "implementing") {
-            if (!transitionTo("verifying", plan)) {
+            if (!transitionTo("verifying")) {
                 notifyTuiOnly(pi, "Failed to transition to verifying state on resume");
             }
         }
@@ -172,15 +176,17 @@ function handleResumeExecutingOrPaused(plan: OrchestrationPlan, pi: ExtensionAPI
     );
 }
 
-function handleResumePlanning(_plan: OrchestrationPlan, pi: ExtensionAPI) {
+function handleResumePlanning(pi: ExtensionAPI) {
     sendResumeMessage(
         pi,
         `System: Resuming from planning state. Use orchestrate_get_plan to review the current tasks, then use orchestrate_start_task to begin execution.`
     );
 }
 
-function handleResumeFailed(plan: OrchestrationPlan, pi: ExtensionAPI) {
-    StateManager.savePlan(plan);
+function handleResumeFailed(pi: ExtensionAPI) {
+    if (OrchestratorState.plan) {
+        StateManager.savePlan(OrchestratorState.plan);
+    }
     sendResumeMessage(
         pi,
         `System: Resuming from failed state. Use orchestrate_check_status to inspect, then orchestrate_replan to recover.`
@@ -197,25 +203,30 @@ function handleResumeFailed(plan: OrchestrationPlan, pi: ExtensionAPI) {
  * through its normal tool flow (orchestrate_start_task → Runner), which is inherently
  * safe and idempotent.
  */
-function resumePlanExecution(_stalePlan: unknown, pi: ExtensionAPI) {
-    const plan = StateManager.loadPlan();
+function resumePlanExecution(pi: ExtensionAPI) {
+    const plan = OrchestratorState.plan || StateManager.loadPlan();
     if (!plan) return;
 
     killAllProcesses("SIGKILL");
 
-    const handlers: Record<string, (p: OrchestrationPlan, pi: ExtensionAPI) => void> = {
+    const handlers: Record<string, (pi: ExtensionAPI) => void> = {
         verifying: handleResumeReview,
         plan_review: handleResumeReview,
         code_review: handleResumeCodeReview,
         implementing: handleResumeExecutingOrPaused,
         paused: handleResumeExecutingOrPaused,
+        stopped: handleResumeExecutingOrPaused,
+        resuming: handleResumeExecutingOrPaused,
+        setup: handleResumeExecutingOrPaused,
+        pausing: handleResumeExecutingOrPaused,
+        replanning: handleResumeExecutingOrPaused,
         planning: handleResumePlanning,
         failed: handleResumeFailed
     };
 
-    const handler = handlers[plan.status];
+    const handler = handlers[OrchestratorState.currentState];
     if (handler) {
-        handler(plan, pi);
+        handler(pi);
     }
 }
 
@@ -256,19 +267,20 @@ async function enterPlanningWithCleanContext(pi: ExtensionAPI, ctx: ExtensionCon
  * Handle the "resume existing incomplete plan" path of /om-enable toggle ON.
  */
 async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAPI, ctx: ExtensionContext) {
+    const inferredState = inferStateFromTasks(plan.tasks);
     const resume = await ctx.ui.confirm(
         "Resume existing orchestration?",
-        `Found incomplete plan: "${plan.goal}" (${plan.status}).\n\nSelect Yes to resume, or No to discard and start fresh.`
+        `Found incomplete plan: "${plan.goal}".\n\nSelect Yes to resume, or No to discard and start fresh.`
     );
 
     if (resume) {
         // Resume the existing plan
         await enterOrchestrationMode(pi, ctx);
-        setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
+        setOrchestrationMode(inferredState, pi, refreshBorder);
         OrchestratorState.shouldResetContext = true;
 
         // Recover interrupted tasks
-        const recovered = recoverInterruptedTasks(plan);
+        const recovered = recoverInterruptedTasks();
         if (recovered > 0) {
             StateManager.savePlan(plan);
         }
@@ -280,7 +292,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
             "info"
         );
 
-        resumePlanExecution(plan, pi);
+        resumePlanExecution(pi);
     } else {
         // Discard - clear everything and start fresh
         StateManager.clearPlan();
@@ -307,7 +319,7 @@ async function handleExistingImplPlan(
 
     if (useExisting) {
         // Keep implementation-plan.md; clear stale plan.json artifacts only
-        if (plan && plan.status === "completed") {
+        if (plan && inferStateFromTasks(plan.tasks) === "completed") {
             StateManager.clearPlanJsonOnly();
         }
         await enterPlanningWithCleanContext(pi, ctx);
@@ -336,7 +348,7 @@ async function handleExistingImplPlan(
  * Handle the "fresh start / no existing plans" path of /om-enable toggle ON.
  */
 async function handleFreshStart(plan: OrchestrationPlan | null, pi: ExtensionAPI, ctx: ExtensionContext) {
-    if (plan && plan.status === "completed") {
+    if (plan && inferStateFromTasks(plan.tasks) === "completed") {
         StateManager.clearPlan();
     }
     await enterPlanningWithCleanContext(pi, ctx);
@@ -368,7 +380,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
 
             // Check for existing incomplete plan
             const plan = StateManager.loadPlan();
-            if (plan && plan.status !== "completed") {
+            if (plan && inferStateFromTasks(plan.tasks) !== "completed") {
                 await handleResumeExistingPlan(plan, pi, ctx);
                 return;
             }
@@ -454,8 +466,8 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         implPlan && implPlan.trim() ? `\n\n--- Approved Implementation Plan ---\n${implPlan}\n--- End of Plan ---` : "";
 
     const plan = StateManager.loadPlan();
-    if (plan && plan.status !== "completed" && plan.tasks.length > 0) {
-        setOrchestrationMode("setup", pi, refreshBorder, plan);
+    if (plan && inferStateFromTasks(plan.tasks) !== "completed" && plan.tasks.length > 0) {
+        setOrchestrationMode("setup", pi, refreshBorder);
         StateManager.savePlan(plan);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
         ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
@@ -471,10 +483,9 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         const goal = extractGoalFromMarkdown(implPlan);
         const newPlan = {
             goal,
-            status: "setup" as const,
             tasks: []
         };
-        setOrchestrationMode("setup", pi, refreshBorder, newPlan);
+        setOrchestrationMode("setup", pi, refreshBorder);
         StateManager.savePlan(newPlan);
 
         ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
@@ -590,8 +601,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
             // --- Toggle ON (enter planning mode) ---
             // Guard: cannot enter planning while execution is active
-            const plan = StateManager.loadPlan();
-            if (isExecutingMode(OrchestratorState.currentState) && plan && ["implementing", "paused", "pausing"].includes(plan.status)) {
+            if (isExecutingMode(OrchestratorState.currentState) && ["implementing", "paused", "pausing"].includes(OrchestratorState.currentState)) {
                 ctx.ui.notify(
                     "Cannot enter planning mode while orchestration is running.\nUse /om-pause or /om-stop first.",
                     "warning"
@@ -604,7 +614,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (existingPlan) {
                 const choice = await ctx.ui.confirm(
                     "Resume editing existing plan?",
-                    `Found existing plan: "${existingPlan.goal}" (${existingPlan.status}).\n\nSelect Yes to continue editing, or No to discard and start fresh.`
+                    `Found existing plan: "${existingPlan.goal}".\n\nSelect Yes to continue editing, or No to discard and start fresh.`
                 );
 
                 if (!choice) {
@@ -641,16 +651,17 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Gracefully pause orchestration (lets current task finish)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            const plan = StateManager.loadPlan();
-            if (plan && plan.status === "implementing") {
+            if (OrchestratorState.currentState === "implementing") {
                 // Graceful pause: set status to 'pausing' so the Runner finishes
                 // the current task before stopping. No processes are killed.
                 // Use 'paused' state for consistency
-                if (!transitionTo("paused", plan)) {
+                if (!transitionTo("paused")) {
                     ctx.ui.notify("Cannot pause execution", "error");
                     return;
                 }
-                StateManager.savePlan(plan);
+                if (OrchestratorState.plan) {
+                    StateManager.savePlan(OrchestratorState.plan);
+                }
                 ctx.ui.notify(
                     "Orchestration pausing gracefully - current task will finish, then execution stops.",
                     "warning"
@@ -681,7 +692,8 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 return;
             }
 
-            if (plan.status === "completed") {
+            const inferred = inferStateFromTasks(plan.tasks);
+            if (inferred === "completed") {
                 ctx.ui.notify(
                     `Plan already completed. Goal: "${plan.goal}". Use /om-reset to clear and start fresh.`,
                     "info"
@@ -690,13 +702,13 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             }
 
             // Recover interrupted tasks
-            const recovered = recoverInterruptedTasks(plan);
+            const recovered = recoverInterruptedTasks();
             if (recovered > 0) {
                 StateManager.savePlan(plan);
             }
 
             await exitPlanningMode(pi, ctx);
-            setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
+            setOrchestrationMode(inferred, pi, refreshBorder);
 
             ctx.ui.notify(
                 recovered > 0
@@ -705,7 +717,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 "info"
             );
 
-            resumePlanExecution(plan, pi);
+            resumePlanExecution(pi);
         }
     });
 
@@ -723,7 +735,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             killAllProcesses("SIGKILL");
 
             // Mark plan as stopped (preserves all state for later resume)
-            if (!transitionTo("stopped", plan)) {
+            if (!transitionTo("stopped")) {
                 notifyTuiOnly(pi, "Failed to transition to stopped state on /om-stop");
             }
             StateManager.savePlan(plan);

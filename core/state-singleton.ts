@@ -26,6 +26,7 @@ export const OrchestratorState = {
     currentState: "inactive" as OrchestrationState,
     pi: undefined as ExtensionAPI | undefined,
     theme: null as Theme | null,
+    plan: null as OrchestrationPlan | null,
 
     // --- Configured Models ---
     simpleTaskModel: null as ModelRef | null,
@@ -101,11 +102,10 @@ export const OrchestratorState = {
 export function setOrchestrationMode(
     state: OrchestrationState,
     pi: ExtensionAPI,
-    onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void,
-    plan?: OrchestrationPlan
+    onMode?: (mode: "inactive" | "planning" | "executing" | "idle") => void
 ) {
-    // Delegate state transition and plan status sync to transitionTo
-    transitionTo(state, plan, true);
+    // Delegate state transition directly
+    transitionTo(state, true);
 
     updateActiveTools(pi);
 
@@ -196,6 +196,7 @@ export function requireActive(ctx: {
 const STATE_DEFAULTS = {
     currentState: "inactive" as OrchestrationState,
     theme: null as Theme | null,
+    plan: null as OrchestrationPlan | null,
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
     summaryModel: null as ModelRef | null,
@@ -493,10 +494,13 @@ export function formatModel(m: ModelRef | null | undefined): string {
 }
 
 /** Count tasks by status. */
-function countTasksByStatus(plan: OrchestrationPlan): Record<string, number> {
+function countTasksByStatus(): Record<string, number> {
+    const plan = OrchestratorState.plan;
     const counts: Record<string, number> = {};
-    for (const task of plan.tasks || []) {
-        counts[task.status] = (counts[task.status] || 0) + 1;
+    if (plan) {
+        for (const task of plan.tasks || []) {
+            counts[task.status] = (counts[task.status] || 0) + 1;
+        }
     }
     return counts;
 }
@@ -505,7 +509,9 @@ function countTasksByStatus(plan: OrchestrationPlan): Record<string, number> {
  * Recover interrupted tasks: any task in 'running' or 'validating' was mid-execution.
  * Returns the number of recovered tasks.
  */
-export function recoverInterruptedTasks(plan: OrchestrationPlan): number {
+export function recoverInterruptedTasks(): number {
+    const plan = OrchestratorState.plan;
+    if (!plan) return 0;
     let recovered = 0;
     for (const task of plan.tasks || []) {
         if (task.status === "running" || task.status === "validating" || task.status === "summarizing") {
@@ -600,8 +606,10 @@ export function truncateToSentence(text: string, maxChars: number = 120): string
 /**
  * Build a human-readable status summary for display.
  */
-export function buildStatusSummary(plan: OrchestrationPlan): string {
-    const counts = countTasksByStatus(plan);
+export function buildStatusSummary(): string {
+    const plan = OrchestratorState.plan;
+    if (!plan) return "No active plan";
+    const counts = countTasksByStatus();
     const parts: string[] = [];
 
     // Show phase/status indicator with granular label when in execution
@@ -610,10 +618,10 @@ export function buildStatusSummary(plan: OrchestrationPlan): string {
         parts.push(`Orchestration Status: planning`);
     } else if (isExecutingMode(state)) {
         const phase = computeExecutionPhaseLabel();
-        const label = phase ? `${phase.toLowerCase()}` : plan.status;
+        const label = phase ? `${phase.toLowerCase()}` : "implementing";
         parts.push(`Orchestration Status: ${label}`);
     } else {
-        parts.push(`Orchestration Status: ${plan.status}`);
+        parts.push(`Orchestration Status: inactive`);
     }
 
     if (plan.currentTaskId) {

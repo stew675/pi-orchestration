@@ -99,7 +99,7 @@ export async function runTasks(
                 const failedTasks = (plan.tasks || []).filter((t) => t.status === "failed");
                 if (failedTasks.length > 0) {
                     // Transition to paused state
-                    if (!transitionTo("paused", plan)) {
+                    if (!transitionTo("paused")) {
                         notifyTuiOnly(pi, "Failed to transition to paused state due to failed tasks");
                     }
                     savePlanSafely(plan);
@@ -123,7 +123,7 @@ export async function runTasks(
                 const allCompleted = (plan.tasks || []).every((t) => t.status === "completed");
                 if (!allCompleted) {
                     // Transition to paused state
-                    if (!transitionTo("paused", plan)) {
+                    if (!transitionTo("paused")) {
                         notifyTuiOnly(pi, "Failed to transition to paused state due to stalled execution");
                     }
                     savePlanSafely(plan);
@@ -192,7 +192,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
     if (finalPlan.tasks.every((t) => t.status === "completed")) {
         const codeReviewModel = OrchestratorState.codeReviewModel;
         if (codeReviewModel) {
-            if (!transitionTo("code_review", finalPlan)) {
+            if (!transitionTo("code_review")) {
                 notifyTuiOnly(pi, "Failed to transition to code_review state");
             }
             savePlanSafely(finalPlan);
@@ -248,7 +248,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             if (approved) {
                 notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
                 // Code review passed — proceed to final verification
-                if (!transitionTo("verifying", updatedPlan)) {
+                if (!transitionTo("verifying")) {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
                 savePlanSafely(updatedPlan);
@@ -257,7 +257,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             } else if (rejected) {
                 notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
                 // Code review rejected — remain in code_review and wake orchestrator for remediation
-                if (!transitionTo("code_review", updatedPlan)) {
+                if (!transitionTo("code_review")) {
                     notifyTuiOnly(pi, "Failed to transition to code_review state");
                 }
                 savePlanSafely(updatedPlan);
@@ -276,7 +276,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 notifyOrchestrator(pi, wakeMessage, { tuiVisible: true });
             } else {
                 notifyTuiOnly(pi, "System: Code review sub-agent produced no verdict — proceeding to FINAL REVIEW.");
-                if (!transitionTo("verifying", updatedPlan)) {
+                if (!transitionTo("verifying")) {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
                 savePlanSafely(updatedPlan);
@@ -284,7 +284,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             }
         } else {
-            if (!transitionTo("verifying", finalPlan)) {
+            if (!transitionTo("verifying")) {
                 notifyTuiOnly(pi, "Failed to transition to verifying state");
             }
             savePlanSafely(finalPlan);
