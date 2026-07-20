@@ -43,7 +43,7 @@ ln -s ~/src/pi-orchestration ~/.pi/agent/extensions/orchestration
 - **Sub-agent idle timeout**: Global watchdog kills any sub-agent with no JSON stream activity for a configurable period (default 5m30s, set via `/om-settings`). Prevents stalled agents that consume resources without progress
 - **Sub-agent max turns**: Global watchdog kills any sub-agent exceeding a maximum model turn count (default 30, set via `/om-settings`). Prevents runaway agents stuck in inefficient loops
 - **Parallel execution**: Configurable number of simultaneous tasks via `/om-settings` (`parallelTasks`, default 1)
-- **Graceful recovery**: Resume from any state (paused, failed, reviewing) without losing progress
+- **Graceful recovery**: Resume from any state (paused, stopped, failed) without losing progress
 - **Watchdog timers**: Each sub-agent phase has an independent timeout; exceeded tasks are killed via SIGTERM → SIGKILL escalation
 
 ## Commands
@@ -201,7 +201,7 @@ A Task Sub-Agent may call for clarification if it finds its prompt to be unclear
 Plan state persists in `.pi/orchestration/plans/plan.json` with crash-resilient backups (`.old`). If an active plan is found at startup:
 - Execution state → prompts to resume; interrupted tasks auto-reset to `pending`
 - Paused/clarification → shows what's waiting
-- Reviewing → wakes the reviewer on resume
+- Stopped → resumes execution on /om-resume
 
 ### Final Verification
 When all tasks are completed the orchestration model will perform one final assessment before approving the goal.  It may create remedial tasks to correct issues where the project has not met the goal.
