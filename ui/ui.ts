@@ -771,7 +771,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
         widgetCtx = ctx;
         // Show widget immediately if there's an existing plan
         const plan = OrchestratorState.plan || StateManager.loadPlan();
-        if (plan && inferStateFromTasks(plan.tasks) !== "completed") {
+        if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
             updateWidget(ctx);
         }
     });
@@ -784,7 +784,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
             return;
         }
         const plan = OrchestratorState.plan || StateManager.loadPlan();
-        if (plan && inferStateFromTasks(plan.tasks) !== "completed") {
+        if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
             updateWidget(ctx);
             ctx.ui.setStatus("orchestrator", buildStatusSummary());
         }
@@ -836,7 +836,7 @@ function updateWidget(ctx: ExtensionContext) {
     }
 
     const plan = OrchestratorState.plan || StateManager.loadPlan();
-    if (!plan || inferStateFromTasks(plan.tasks) === "completed") {
+    if (!plan || inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
         ctx.ui.setWidget("orchestrator-status", undefined);
         return;
     }

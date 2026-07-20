@@ -267,7 +267,7 @@ async function enterPlanningWithCleanContext(pi: ExtensionAPI, ctx: ExtensionCon
  * Handle the "resume existing incomplete plan" path of /om-enable toggle ON.
  */
 async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAPI, ctx: ExtensionContext) {
-    const inferredState = inferStateFromTasks(plan.tasks);
+    const inferredState = inferStateFromTasks(plan.tasks, plan.attributes);
     const resume = await ctx.ui.confirm(
         "Resume existing orchestration?",
         `Found incomplete plan: "${plan.goal}".\n\nSelect Yes to resume, or No to discard and start fresh.`
@@ -319,7 +319,7 @@ async function handleExistingImplPlan(
 
     if (useExisting) {
         // Keep implementation-plan.md; clear stale plan.json artifacts only
-        if (plan && inferStateFromTasks(plan.tasks) === "completed") {
+        if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
             StateManager.clearPlanJsonOnly();
         }
         await enterPlanningWithCleanContext(pi, ctx);
@@ -348,7 +348,7 @@ async function handleExistingImplPlan(
  * Handle the "fresh start / no existing plans" path of /om-enable toggle ON.
  */
 async function handleFreshStart(plan: OrchestrationPlan | null, pi: ExtensionAPI, ctx: ExtensionContext) {
-    if (plan && inferStateFromTasks(plan.tasks) === "completed") {
+    if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
         StateManager.clearPlan();
     }
     await enterPlanningWithCleanContext(pi, ctx);
@@ -380,7 +380,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
 
             // Check for existing incomplete plan
             const plan = StateManager.loadPlan();
-            if (plan && inferStateFromTasks(plan.tasks) !== "completed") {
+            if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
                 await handleResumeExistingPlan(plan, pi, ctx);
                 return;
             }
@@ -466,7 +466,9 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         implPlan && implPlan.trim() ? `\n\n--- Approved Implementation Plan ---\n${implPlan}\n--- End of Plan ---` : "";
 
     const plan = StateManager.loadPlan();
-    if (plan && inferStateFromTasks(plan.tasks) !== "completed" && plan.tasks.length > 0) {
+    if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed" && plan.tasks.length > 0) {
+        if (!plan.attributes) plan.attributes = [];
+        if (!plan.attributes.includes("PLAN_APPROVED")) plan.attributes.push("PLAN_APPROVED");
         setOrchestrationMode("setup", pi, refreshBorder);
         StateManager.savePlan(plan);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
@@ -483,7 +485,8 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         const goal = extractGoalFromMarkdown(implPlan);
         const newPlan = {
             goal,
-            tasks: []
+            tasks: [],
+            attributes: ["PLAN_APPROVED"]
         };
         setOrchestrationMode("setup", pi, refreshBorder);
         StateManager.savePlan(newPlan);
@@ -692,7 +695,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 return;
             }
 
-            const inferred = inferStateFromTasks(plan.tasks);
+            const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
             if (inferred === "completed") {
                 ctx.ui.notify(
                     `Plan already completed. Goal: "${plan.goal}". Use /om-reset to clear and start fresh.`,

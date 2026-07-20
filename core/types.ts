@@ -43,6 +43,7 @@ export interface OrchestrationPlan {
     goal: string;
     currentTaskId?: string;
     tasks: Task[];
+    attributes?: string[];
 }
 
 export const ALL_TASK_STATUSES = [

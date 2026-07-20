@@ -247,6 +247,11 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
 
             if (approved) {
                 notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
+                if (!updatedPlan.attributes) updatedPlan.attributes = [];
+                updatedPlan.attributes = updatedPlan.attributes.filter(a => a !== "CODE_REVIEW_REJECTED");
+                if (!updatedPlan.attributes.includes("CODE_REVIEW_APPROVED")) {
+                    updatedPlan.attributes.push("CODE_REVIEW_APPROVED");
+                }
                 // Code review passed — proceed to final verification
                 if (!transitionTo("verifying")) {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
@@ -256,6 +261,11 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             } else if (rejected) {
                 notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
+                if (!updatedPlan.attributes) updatedPlan.attributes = [];
+                updatedPlan.attributes = updatedPlan.attributes.filter(a => a !== "CODE_REVIEW_APPROVED");
+                if (!updatedPlan.attributes.includes("CODE_REVIEW_REJECTED")) {
+                    updatedPlan.attributes.push("CODE_REVIEW_REJECTED");
+                }
                 // Code review rejected — remain in code_review and wake orchestrator for remediation
                 if (!transitionTo("code_review")) {
                     notifyTuiOnly(pi, "Failed to transition to code_review state");

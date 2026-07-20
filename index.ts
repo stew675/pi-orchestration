@@ -126,7 +126,7 @@ export default function (pi: ExtensionAPI) {
         OrchestratorState.plan = StateManager.loadPlan();
         const plan = OrchestratorState.plan;
         if (plan) {
-            const inferred = inferStateFromTasks(plan.tasks);
+            const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
             if (inferred !== "completed") {
                 ctx.ui.notify(
                     `Incomplete orchestration plan found: "${plan.goal}". Run /om-enable to resume or discard.`,
@@ -255,6 +255,12 @@ export default function (pi: ExtensionAPI) {
         } else if (event.toolName === "orchestrate_approve_goal" && isExecutingMode(OrchestratorState.currentState)) {
             // Final approval - transition to completed state
             if (OrchestratorState.plan) {
+                if (!OrchestratorState.plan.attributes) {
+                    OrchestratorState.plan.attributes = [];
+                }
+                if (!OrchestratorState.plan.attributes.includes("VERIFIED")) {
+                    OrchestratorState.plan.attributes.push("VERIFIED");
+                }
                 if (!transitionTo("completed")) {
                     notifyTuiOnly(pi, "Failed to transition to completed state after approve_goal");
                 }

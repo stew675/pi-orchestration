@@ -93,11 +93,24 @@ export function transitionTo(newState: OrchestrationState, force = false): boole
 }
 
 /**
- * Infer the OrchestrationState when resuming based on the state of tasks.
+ * Infer the OrchestrationState when resuming based on the state of tasks and attributes.
  */
-export function inferStateFromTasks(tasks: Task[]): OrchestrationState {
-  if (!tasks || tasks.length === 0) {
+export function inferStateFromTasks(tasks: Task[], attributes: string[] = []): OrchestrationState {
+  if (attributes.includes("VERIFIED")) {
+    return "completed";
+  }
+
+  if (attributes.includes("CODE_REVIEW_REJECTED")) {
+    return "code_review";
+  }
+
+  // If the plan has not been approved yet, we are in the planning phase.
+  if (!attributes.includes("PLAN_APPROVED")) {
     return "planning";
+  }
+
+  if (!tasks || tasks.length === 0) {
+    return "setup";
   }
 
   // If any task is failed, resume in 'failed' so the user/orchestrator can replan
@@ -105,22 +118,16 @@ export function inferStateFromTasks(tasks: Task[]): OrchestrationState {
     return "failed";
   }
 
-  // If all tasks are completed, the plan is completed
+  // If all tasks are completed
   if (tasks.every((t) => t.status === "completed")) {
-    return "completed";
-  }
-
-  // If there is any active/completed task, resume as 'implementing'
-  const activeOrDone = tasks.some(
-    (t) =>
-      t.status === "running" ||
-      t.status === "validating" ||
-      t.status === "summarizing" ||
-      t.status === "awaiting_clarification" ||
-      t.status === "completed"
-  );
-  if (activeOrDone) {
-    return "implementing";
+    const codeReviewModel = OrchestratorState.codeReviewModel;
+    if (codeReviewModel) {
+      if (attributes.includes("CODE_REVIEW_APPROVED")) {
+        return "verifying";
+      }
+      return "code_review";
+    }
+    return "verifying";
   }
 
   // Default to implementing
