@@ -43,7 +43,7 @@ export async function executeTask(
         const currentPlan = StateManager.loadPlan();
         if (!currentPlan) return false;
 
-        const currentState = getCurrentOrchestrationState(currentPlan);
+        const currentState = getCurrentOrchestrationState();
 
         // Hard stop
         if (currentState === "paused" || currentState === "failed") {

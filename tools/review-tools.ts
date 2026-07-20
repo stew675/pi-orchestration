@@ -20,7 +20,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             "Mark the goal as fully satisfied and complete the orchestration. Only callable during review phase.",
         promptSnippet: "Approve that the project meets the original goal and finish",
         promptGuidelines: [
-            "Call orchestrate_approve_goal ONLY when plan status is 'reviewing' (after all tasks completed). " +
+            "Call orchestrate_approve_goal ONLY when plan status is 'plan_review' (after all tasks completed). " +
                 "It will FAIL if called during planning, executing, or any other phase."
         ],
         parameters: Type.Object({
@@ -34,8 +34,8 @@ export function registerReviewTools(pi: ExtensionAPI) {
 
             if (plan.status === "code_review") {
                 throw new Error(
-                    "orchestrate_approve_goal may not be used when in the REVIEWING phase. " +
-                    "To exit the REVIEWING phase, you must either use orchestrate_complete_review, " +
+                    "orchestrate_approve_goal may not be used when in the CODE_REVIEW phase. " +
+                    "To exit the CODE_REVIEW phase, you must either use orchestrate_complete_review, " +
                     "or issue 1 or more task commands (such as orchestrate_add_task) followed by orchestrate_start_task."
                 );
             }
@@ -73,7 +73,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
     pi.registerTool({
         name: "orchestrate_complete_review",
         label: "Complete Code Review",
-        description: "Complete the code review phase and proceed to final verification. Only callable during the REVIEWING phase.",
+        description: "Complete the code review phase and proceed to final verification. Only callable during the CODE_REVIEW phase.",
         parameters: Type.Object({}),
         async execute() {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
@@ -85,7 +85,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
                     content: [
                         {
                             type: "text",
-                            text: "orchestrate_complete_review may only be used when in the REVIEWING phase."
+                            text: "orchestrate_complete_review may only be used when in the CODE_REVIEW phase."
                         }
                     ],
                     details: {}

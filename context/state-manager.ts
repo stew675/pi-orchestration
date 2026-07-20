@@ -14,13 +14,14 @@ function mapStateToPlanStatus(state: OrchestrationState): OrchestrationPlan["sta
     const mapping: Record<OrchestrationState, OrchestrationPlan["status"]> = {
         inactive: "planning",
         planning: "planning",
-        reviewing: "planning",
-        reviewed: "planning",
+        plan_review: "planning",
+        plan_reviewed: "planning",
         setup: "setup",
         implementing: "implementing",
         replanning: "replanning",
         pausing: "pausing",
         paused: "paused",
+        stopped: "paused",
         resuming: "implementing",
         failed: "failed",
         completed: "completed",
@@ -445,7 +446,7 @@ export class StateManager {
         const primary = tryLoad(planPath);
         if (primary) {
             // Ensure plan status is consistent with current orchestration state
-            const currentState = getCurrentOrchestrationState(primary);
+            const currentState = getCurrentOrchestrationState();
             if (currentState !== "inactive") {
                 const expectedStatus = mapStateToPlanStatus(currentState);
                 if (primary.status !== expectedStatus) {

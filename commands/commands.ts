@@ -102,7 +102,7 @@ function handleResumeCodeReview(plan: OrchestrationPlan, pi: ExtensionAPI) {
     // Re-run the code review sub-agent. If it fails again, fall through to normal review.
     sendResumeMessage(
         pi,
-        `System: Resuming from REVIEWING state. Code review was interrupted — re-running automated code review.`
+        `System: Resuming from CODE_REVIEW state. Code review was interrupted — re-running automated code review.`
     );
 
     // Set status back so the runner can pick up the code-review flow via finishPlan
@@ -205,7 +205,7 @@ function resumePlanExecution(_stalePlan: unknown, pi: ExtensionAPI) {
 
     const handlers: Record<string, (p: OrchestrationPlan, pi: ExtensionAPI) => void> = {
         verifying: handleResumeReview,
-        reviewing: handleResumeReview,
+        plan_review: handleResumeReview,
         code_review: handleResumeCodeReview,
         reviewing_code: handleResumeCodeReview,
         implementing: handleResumeExecutingOrPaused,
@@ -268,8 +268,6 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
         await enterOrchestrationMode(pi, ctx);
         setOrchestrationMode(mapPlanStatusToState(plan.status), pi, refreshBorder, plan);
         OrchestratorState.shouldResetContext = true;
-        OrchestratorState._manualPause = false;
-        OrchestratorState._pauseReason = null;
 
         // Recover interrupted tasks
         const recovered = recoverInterruptedTasks(plan);
@@ -449,8 +447,6 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     // Exit planning mode (restore pre-planning model if one was captured)
     await exitPlanningMode(pi, ctx);
     OrchestratorState.shouldResetContext = true;
-    OrchestratorState._manualPause = false;
-    OrchestratorState._pauseReason = null;
     // Clear planning hint flags — no longer in planning
     OrchestratorState._preWriteHintSent = false;
 
@@ -647,8 +643,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Gracefully pause orchestration (lets current task finish)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            OrchestratorState._manualPause = true;
-            OrchestratorState._pauseReason = "pause";
             const plan = StateManager.loadPlan();
             if (plan && plan.status === "implementing") {
                 // Graceful pause: set status to 'pausing' so the Runner finishes
@@ -688,8 +682,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 ctx.ui.notify("No orchestration plan found. Describe a goal or plan with the agent.", "warning");
                 return;
             }
-            OrchestratorState._manualPause = false;
-            OrchestratorState._pauseReason = null;
 
             if (plan.status === "completed") {
                 ctx.ui.notify(
@@ -720,11 +712,9 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
     });
 
     pi.registerCommand("om-stop", {
-        description: "Immediately stop all running sub-agents and mark plan as paused (can be resumed later)",
+        description: "Immediately stop all running sub-agents (can be resumed later)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            OrchestratorState._manualPause = true;
-            OrchestratorState._pauseReason = "stop";
             const plan = StateManager.loadPlan();
             if (!plan) {
                 ctx.ui.notify("No active orchestration plan.", "warning");
@@ -734,9 +724,9 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             // Kill running processes immediately
             killAllProcesses("SIGKILL");
 
-            // Mark plan as paused (preserves all state for later resume)
-            if (!transitionTo("paused", plan)) {
-                notifyTuiOnly(pi, "Failed to transition to paused state on /om-stop");
+            // Mark plan as stopped (preserves all state for later resume)
+            if (!transitionTo("stopped", plan)) {
+                notifyTuiOnly(pi, "Failed to transition to stopped state on /om-stop");
             }
             StateManager.savePlan(plan);
 
@@ -754,8 +744,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
                 StateManager.clearPlan();
                 await exitPlanningMode(pi, ctx);
-                OrchestratorState._manualPause = false;
-                OrchestratorState._pauseReason = null;
                 OrchestratorState._inReviewPhase = false;
                 setOrchestrationMode("planning", pi, refreshBorder);
                 ctx.ui.notify("Orchestration plan cleared. Describe a new goal to start planning.", "info");

@@ -51,7 +51,7 @@ export async function runTasks(
             }
 
             // Get current state from state machine
-            const currentState = getCurrentOrchestrationState(plan);
+            const currentState = getCurrentOrchestrationState();
 
             // Hard stop for paused/failed plans
             if (currentState === "paused" || currentState === "failed") {
@@ -271,7 +271,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                     "2. Ignore all items of Low priority or lower.",
                     "3. Analyze the remaining items for false-positives and reject those.",
                     "4. If any review items remain, issue remedial tasks to correct them (use orchestrate_add_task, orchestrate_edit_task, etc., and then orchestrate_start_task).",
-                    "5. If you find that nothing in the code-review requires further action, you MUST call orchestrate_complete_review to exit the REVIEWING phase."
+                    "5. If you find that nothing in the code-review requires further action, you MUST call orchestrate_complete_review to exit the CODE_REVIEW phase."
                 ].join("\n");
                 notifyOrchestrator(pi, wakeMessage, { tuiVisible: true });
             } else {

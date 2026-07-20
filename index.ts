@@ -85,7 +85,7 @@ export default function (pi: ExtensionAPI) {
                 const plan = StateManager.loadPlan();
                 if (
                     !isExecutingMode(OrchestratorState.currentState) ||
-                    OrchestratorState._manualPause ||
+                    ["paused", "stopped", "pausing"].includes(OrchestratorState.currentState) ||
                     !isAgentIdle ||
                     activeProcesses.size > 0 ||
                     !plan ||

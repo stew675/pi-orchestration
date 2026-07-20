@@ -70,7 +70,7 @@ function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     }
 
     // Get canonical state from state machine
-    const state = getCurrentOrchestrationState(plan);
+    const state = getCurrentOrchestrationState();
     const color: SemanticColor = STATE_COLORS[state] ?? "text";
 
     return OrchestratorState.theme.fg.bind(OrchestratorState.theme, color);
@@ -135,13 +135,14 @@ interface PlanDisplayOptions {
 const STATE_COLORS: Record<OrchestrationState, SemanticColor> = {
     inactive: "text",
     planning: "mdHeading",
-    reviewing: "borderAccent",
-    reviewed: "mdHeading",
+    plan_review: "borderAccent",
+    plan_reviewed: "mdHeading",
     setup: "warning",
     implementing: "success",
     replanning: "warning",
     pausing: "warning",
     paused: "warning",
+    stopped: "error",
     resuming: "success",
     failed: "error",
     verifying: "accent",
@@ -156,7 +157,8 @@ const PHASE_LABEL_COLORS: Record<string, SemanticColor> = {
     IMPLEMENTING: "success",
     REPLANNING: "warning",
     VERIFYING: "accent",
-    REVIEWING: "borderAccent",
+    PLAN_REVIEW: "borderAccent",
+    CODE_REVIEW: "borderAccent",
     PAUSED: "warning",
     STOPPED: "error",
     COMPLETED: "border",
@@ -182,7 +184,11 @@ const PHASE_DETAIL_RENDERERS: Record<
         lines.push(t.fg("warning", "  -> Awaiting final verification by orchestrator"));
         lines.push(t.fg("dim", "  Use /om-resume to wake the reviewer if nothing happens"));
     },
-    REVIEWING: (lines, _plan, t) => {
+    PLAN_REVIEW: (lines, _plan, t) => {
+        lines.push(t.fg("warning", "  -> Plan review in progress"));
+        lines.push(t.fg("dim", "  Reviewer model is evaluating the implementation plan"));
+    },
+    CODE_REVIEW: (lines, _plan, t) => {
         lines.push(t.fg("warning", "  -> Code review in progress or actions required"));
         lines.push(t.fg("dim", "  Read .pi/orchestration/plans/code-review.md for findings"));
     },
@@ -268,7 +274,7 @@ function buildPlanDisplay(
     const lines: string[] = [];
 
     // Header with status and goal
-    const phaseLabel = computeExecutionPhaseLabel(p);
+    const phaseLabel = computeExecutionPhaseLabel();
     const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {
@@ -459,7 +465,7 @@ function buildTaskListView(
     const p = plan;
 
     // --- Header (label + goal + progress bar + phase detail messages) ---
-    const phaseLabel = computeExecutionPhaseLabel(p);
+    const phaseLabel = computeExecutionPhaseLabel();
     const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
     if (p.goal) {
