@@ -54,7 +54,7 @@ export const STATE_TRANSITIONS: Record<OrchestrationState, Array<OrchestrationSt
   stopped: ["implementing", "replanning", "inactive"],
   resuming: ["implementing", "failed", "inactive"],
   failed: ["replanning", "implementing", "inactive"],
-  verifying: ["completed", "inactive"],
+  verifying: ["implementing", "replanning", "completed", "inactive"],
   completed: ["planning", "inactive"],
   code_review: ["implementing", "verifying", "stopped", "failed", "inactive"],
 };

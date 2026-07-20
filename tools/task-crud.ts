@@ -6,7 +6,7 @@ import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
 import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
 import { isActive as stateIsActive } from "../core/state-machine";
-import type { Task, TaskType } from "../core/types";
+import { isTaskReadOnly, type Task, type TaskType } from "../core/types";
 import { healDependenciesOnDelete } from "../validation/validation";
 import {
     validatePlan,

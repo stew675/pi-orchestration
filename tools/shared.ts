@@ -172,9 +172,9 @@ export function requireTaskCrudPrereqs() {
     requireExecutionMode();
     
     const state = OrchestratorState.currentState;
-    if (state !== "setup" && state !== "replanning") {
+    if (state !== "setup" && state !== "replanning" && state !== "verifying") {
         throw new Error(
-            `Blocked: task modification (add, edit, delete, complete) is only allowed during 'setup' or 'replanning' states. Current state is '${state}'.`
+            `Blocked: task modification (add, edit, delete, complete) is only allowed during 'setup', 'replanning', or 'verifying' states. Current state is '${state}'.`
         );
     }
 }

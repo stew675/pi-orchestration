@@ -209,7 +209,7 @@ export interface ReadOnlyAgentOptions<T> {
 
 /** Result of a generic read-only sub-agent execution. */
 export type ReadOnlyAgentResult<T> =
-    | { resolved: true; value: T; lastAssistantText?: string; code: number | null; killed: boolean }
+    | { resolved: true; value: T; killedByWatchdog?: "idle_timeout" | "max_turns"; lastAssistantText?: string; code: number | null; killed: boolean }
     | { resolved: false; code: number | null; killedByWatchdog?: "idle_timeout" | "max_turns"; lastAssistantText?: string; killed: boolean };
 
 /** Spawn a generic read-only sub-agent with standard monitoring and watchdog enforcement.
@@ -266,9 +266,11 @@ export async function runReadOnlyAgent<T>(options: ReadOnlyAgentOptions<T>): Pro
             // Don't clear active task - another sub-agent may be running concurrently
 
             if (earlyResult !== null) {
+                const monState = monitor.getMonitoredAgent(taggedId);
                 resolve({
                     resolved: true,
                     value: earlyResult,
+                    killedByWatchdog: monState?.killedByWatchdog ?? undefined,
                     lastAssistantText,
                     code,
                     killed: child.killed
@@ -291,16 +293,18 @@ export async function runReadOnlyAgent<T>(options: ReadOnlyAgentOptions<T>): Pro
 
         child.on("error", () => {
             clearTimeout();
+            const monState = monitor.getMonitoredAgent(taggedId);
             if (earlyResult !== null) {
                 resolve({
                     resolved: true,
                     value: earlyResult,
+                    killedByWatchdog: monState?.killedByWatchdog ?? undefined,
                     lastAssistantText,
                     code: null,
                     killed: child.killed
                 });
             } else {
-                resolve({ resolved: false, code: null, lastAssistantText, killed: child.killed });
+                resolve({ resolved: false, code: null, killedByWatchdog: monState?.killedByWatchdog ?? undefined, lastAssistantText, killed: child.killed });
             }
         });
     });

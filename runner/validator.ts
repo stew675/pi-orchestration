@@ -14,7 +14,6 @@ import { notifyTuiOnly } from "./utils";
 
 const FEEDBACK_TIMEOUT = "Validator timed out without issuing a verdict.";
 const FEEDBACK_NO_OUTPUT = "Validator produced no output (empty response).";
-const FEEDBACK_PROCESS_ERROR_PREFIX = "Validator process error: ";
 const VALIDATOR_MAX_ATTEMPTS = 2;
 
 /**
