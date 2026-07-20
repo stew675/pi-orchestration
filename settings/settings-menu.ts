@@ -94,67 +94,24 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         return;
     }
 
-    // Build the menu items - labels with current values shown in parens.
-    function buildItems(): SelectItem[] {
-        const orchStr = formatModel(OrchestratorState.orchestrationModel);
-        const planStr = formatModel(OrchestratorState.planningModel);
-        const simpleTaskStr = formatModel(OrchestratorState.simpleTaskModel);
-        const complexTaskStr = formatModel(OrchestratorState.complexTaskModel);
-        const validatorStr = formatModel(OrchestratorState.validatorModel);
-        const summaryStr = formatModel(OrchestratorState.summaryModel);
-        const reviewerStr = formatModel(OrchestratorState.reviewerModel) || "(disabled)";
-        const codeReviewStr = formatModel(OrchestratorState.codeReviewModel) || "(disabled)";
-        const concStr = OrchestratorState.summarizationConcurrency.toString();
-        const parallelTasksStr = OrchestratorState.parallelTasks.toString();
 
-        const taskTimeoutStr = formatTimeout(OrchestratorState.taskTimeoutMs);
-        const validatorTimeoutStr = formatTimeout(OrchestratorState.validatorTimeoutMs);
-        const taskSummaryTimeoutStr = formatTimeout(OrchestratorState.taskSummaryTimeoutMs);
-        const subAgentIdleTimeoutStr = formatTimeout(OrchestratorState.subAgentIdleTimeoutMs);
-        const subAgentMaxTurnsStr = OrchestratorState.subAgentMaxTurns === 0
-            ? "unlimited"
-            : OrchestratorState.subAgentMaxTurns.toString();
-        const stopToolStr = OrchestratorState.allowStopTool ? "enabled" : "disabled";
-        const validateSimpleStr = OrchestratorState.validateSimpleTasks ? "enabled" : "disabled";
-        const validateComplexStr = OrchestratorState.validateComplexTasks ? "enabled" : "disabled";
 
-        return [
-            { value: "orchestration-model", label: `Orchestration model (${orchStr})` },
-            { value: "planning-model", label: `Planning model (${planStr})` },
-            { value: "simple-task-model", label: `Simple task model (${simpleTaskStr})` },
-            { value: "complex-task-model", label: `Complex task model (${complexTaskStr})` },
-            { value: "validator-model", label: `Validator model (${validatorStr})` },
-            { value: "summary-model", label: `Summary model (${summaryStr})` },
-            { value: "reviewer-model", label: `Plan review model (${reviewerStr})` },
-            { value: "code-review-model", label: `Code review model (${codeReviewStr})` },
-            { value: "summarization-concurrency", label: `Summarization concurrency (${concStr})` },
-            { value: "parallel-tasks", label: `Parallel tasks (${parallelTasksStr})` },
-            { value: "timeout-task", label: `Task timeout (${taskTimeoutStr})` },
-            { value: "timeout-validator", label: `Validator timeout (${validatorTimeoutStr})` },
-            { value: "timeout-task-summary", label: `Task summary timeout (${taskSummaryTimeoutStr})` },
-            { value: "timeout-sub-agent-idle", label: `Sub-agent idle timeout (${subAgentIdleTimeoutStr})` },
-            { value: "max-turns", label: `Sub-agent max turns (${subAgentMaxTurnsStr})` },
-            { value: "allow-stop-tool", label: `Allow orchestrate_stop (${stopToolStr})` },
-            { value: "validate-simple-tasks", label: `Validate simple tasks (${validateSimpleStr})` },
-            { value: "validate-complex-tasks", label: `Validate complex tasks (${validateComplexStr})` },
-            { value: "reset-defaults", label: "Reset models to defaults" }
-        ];
-    }
-
-    // Rebuild items so the menu always shows fresh values.
-    const showMenu = () => {
+    // --- Top-level menu (category level) ---
+    const showTopMenu = () => {
         return ctx.ui.custom<string | null>(
             (tui, theme, _kb, done) => {
                 const container = new Container();
-
-                // Top border
                 container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
-
-                // Title
                 container.addChild(new Text(theme.fg("accent", theme.bold("Orchestration Settings")), 1, 0));
 
-                const items = buildItems();
-                const selectList = new SelectList(items, Math.min(items.length, 12), {
+                const topItems: SelectItem[] = [
+                    { value: "models", label: "Models" },
+                    { value: "execution", label: "Execution" },
+                    { value: "behavior", label: "Behavior" },
+                    { value: "reset-defaults", label: "Reset models to defaults" }
+                ];
+
+                const selectList = new SelectList(topItems, Math.min(topItems.length, 18), {
                     selectedPrefix: (t) => theme.fg("accent", t),
                     selectedText: (t) => theme.fg("accent", t),
                     description: (t) => theme.fg("muted", t),
@@ -164,11 +121,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 selectList.onSelect = (item) => done(item.value);
                 selectList.onCancel = () => done(null);
                 container.addChild(selectList);
-
-                // Help text
                 container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc cancel"), 1, 0));
-
-                // Bottom border
                 container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
 
                 return {
@@ -180,7 +133,148 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                     }
                 };
             },
-            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 2 } }
+            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
+        );
+    };
+
+    // --- Models sub-menu ---
+    function buildModelItems(): SelectItem[] {
+        return [
+            { value: "orchestration-model", label: `Orchestration model (${formatModel(OrchestratorState.orchestrationModel)})` },
+            { value: "planning-model", label: `Planning model (${formatModel(OrchestratorState.planningModel)})` },
+            { value: "simple-task-model", label: `Simple task model (${formatModel(OrchestratorState.simpleTaskModel)})` },
+            { value: "complex-task-model", label: `Complex task model (${formatModel(OrchestratorState.complexTaskModel)})` },
+            { value: "validator-model", label: `Validator model (${formatModel(OrchestratorState.validatorModel)})` },
+            { value: "summary-model", label: `Summary model (${formatModel(OrchestratorState.summaryModel)})` },
+            { value: "reviewer-model", label: `Plan review model (${formatModel(OrchestratorState.reviewerModel) || "(disabled)"})` },
+            { value: "code-review-model", label: `Code review model (${formatModel(OrchestratorState.codeReviewModel) || "(disabled)"})` }
+        ];
+    }
+
+    const showModelsMenu = (initialIndex: number = 0) => {
+        return ctx.ui.custom<string | null>(
+            (tui, theme, _kb, done) => {
+                const container = new Container();
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+                container.addChild(new Text(theme.fg("accent", theme.bold("Models")), 1, 0));
+
+                const items = buildModelItems();
+                const selectList = new SelectList(items, Math.min(items.length, 18), {
+                    selectedPrefix: (t) => theme.fg("accent", t),
+                    selectedText: (t) => theme.fg("accent", t),
+                    description: (t) => theme.fg("muted", t),
+                    scrollInfo: (t) => theme.fg("dim", t),
+                    noMatch: (t) => theme.fg("warning", t)
+                });
+                selectList.setSelectedIndex(initialIndex);
+                selectList.onSelect = (item) => done(item.value);
+                selectList.onCancel = () => done(null);
+                container.addChild(selectList);
+                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc back"), 1, 0));
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+                return {
+                    render: (w) => container.render(w),
+                    invalidate: () => container.invalidate(),
+                    handleInput: (data) => {
+                        selectList.handleInput(data);
+                        tui.requestRender();
+                    }
+                };
+            },
+            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
+        );
+    };
+
+    // --- Execution sub-menu ---
+    function buildExecutionItems(): SelectItem[] {
+        return [
+            { value: "summarization-concurrency", label: `Summarization concurrency (${OrchestratorState.summarizationConcurrency})` },
+            { value: "parallel-tasks", label: `Parallel tasks (${OrchestratorState.parallelTasks})` },
+            { value: "timeout-task", label: `Task timeout (${formatTimeout(OrchestratorState.taskTimeoutMs)})` },
+            { value: "timeout-validator", label: `Validator timeout (${formatTimeout(OrchestratorState.validatorTimeoutMs)})` },
+            { value: "timeout-task-summary", label: `Task summary timeout (${formatTimeout(OrchestratorState.taskSummaryTimeoutMs)})` },
+            { value: "timeout-sub-agent-idle", label: `Sub-agent idle timeout (${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)})` },
+            { value: "max-turns", label: `Sub-agent max turns (${OrchestratorState.subAgentMaxTurns === 0 ? "unlimited" : OrchestratorState.subAgentMaxTurns})` }
+        ];
+    }
+
+    const showExecutionMenu = (initialIndex: number = 0) => {
+        return ctx.ui.custom<string | null>(
+            (tui, theme, _kb, done) => {
+                const container = new Container();
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+                container.addChild(new Text(theme.fg("accent", theme.bold("Execution")), 1, 0));
+
+                const items = buildExecutionItems();
+                const selectList = new SelectList(items, Math.min(items.length, 18), {
+                    selectedPrefix: (t) => theme.fg("accent", t),
+                    selectedText: (t) => theme.fg("accent", t),
+                    description: (t) => theme.fg("muted", t),
+                    scrollInfo: (t) => theme.fg("dim", t),
+                    noMatch: (t) => theme.fg("warning", t)
+                });
+                selectList.setSelectedIndex(initialIndex);
+                selectList.onSelect = (item) => done(item.value);
+                selectList.onCancel = () => done(null);
+                container.addChild(selectList);
+                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter select • esc back"), 1, 0));
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+                return {
+                    render: (w) => container.render(w),
+                    invalidate: () => container.invalidate(),
+                    handleInput: (data) => {
+                        selectList.handleInput(data);
+                        tui.requestRender();
+                    }
+                };
+            },
+            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
+        );
+    };
+
+    // --- Behavior sub-menu ---
+    function buildBehaviorItems(): SelectItem[] {
+        return [
+            { value: "allow-stop-tool", label: `Allow orchestrate_stop (${OrchestratorState.allowStopTool ? "enabled" : "disabled"})` },
+            { value: "validate-simple-tasks", label: `Validate simple tasks (${OrchestratorState.validateSimpleTasks ? "enabled" : "disabled"})` },
+            { value: "validate-complex-tasks", label: `Validate complex tasks (${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"})` }
+        ];
+    }
+
+    const showBehaviorMenu = (initialIndex: number = 0) => {
+        return ctx.ui.custom<string | null>(
+            (tui, theme, _kb, done) => {
+                const container = new Container();
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+                container.addChild(new Text(theme.fg("accent", theme.bold("Behavior")), 1, 0));
+
+                const items = buildBehaviorItems();
+                const selectList = new SelectList(items, Math.min(items.length, 18), {
+                    selectedPrefix: (t) => theme.fg("accent", t),
+                    selectedText: (t) => theme.fg("accent", t),
+                    description: (t) => theme.fg("muted", t),
+                    scrollInfo: (t) => theme.fg("dim", t),
+                    noMatch: (t) => theme.fg("warning", t)
+                });
+                selectList.setSelectedIndex(initialIndex);
+                selectList.onSelect = (item) => done(item.value);
+                selectList.onCancel = () => done(null);
+                container.addChild(selectList);
+                container.addChild(new Text(theme.fg("dim", "↑↓ navigate • enter toggle • esc back"), 1, 0));
+                container.addChild(new DynamicBorder((s: string) => theme.fg("accent", s)));
+
+                return {
+                    render: (w) => container.render(w),
+                    invalidate: () => container.invalidate(),
+                    handleInput: (data) => {
+                        selectList.handleInput(data);
+                        tui.requestRender();
+                    }
+                };
+            },
+            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 1 } }
         );
     };
 
@@ -267,12 +361,62 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         }
     };
 
-    // Show the menu; loop so that after a sub-handler finishes we re-show it.
+    // Main loop: top-level menu → sub-menu or action → back to top.
+    // Track last-selected value per sub-menu so the cursor stays on the changed item.
+    let lastModelChoice: string | null = null;
+    let lastExecChoice: string | null = null;
+    let lastBehavChoice: string | null = null;
+
     while (true) {
-        const choice = await showMenu();
-        if (!choice) return; // escape - done
-        const handler = choiceHandlers[choice];
-        if (handler) await handler();
+        const topChoice = await showTopMenu();
+        if (!topChoice) return; // escape - done
+
+        // Category navigation — enter a sub-menu, then return here after each action.
+        if (topChoice === "models") {
+            while (true) {
+                // Remember which item to restore cursor on after rebuild.
+                const prevIndex = lastModelChoice != null
+                    ? buildModelItems().findIndex(i => i.value === lastModelChoice)
+                    : 0;
+                if (prevIndex > 0) lastModelChoice = null; // consumed
+
+                const modelChoice = await showModelsMenu(prevIndex);
+                if (!modelChoice) break; // esc back to top menu
+                lastModelChoice = modelChoice; // remember for next rebuild
+                const handler = choiceHandlers[modelChoice];
+                if (handler) await handler();
+            }
+        } else if (topChoice === "execution") {
+            while (true) {
+                const prevIndex = lastExecChoice != null
+                    ? buildExecutionItems().findIndex(i => i.value === lastExecChoice)
+                    : 0;
+                if (prevIndex > 0) lastExecChoice = null; // consumed
+
+                const execChoice = await showExecutionMenu(prevIndex);
+                if (!execChoice) break; // esc back to top menu
+                lastExecChoice = execChoice; // remember for next rebuild
+                const handler = choiceHandlers[execChoice];
+                if (handler) await handler();
+            }
+        } else if (topChoice === "behavior") {
+            while (true) {
+                const prevIndex = lastBehavChoice != null
+                    ? buildBehaviorItems().findIndex(i => i.value === lastBehavChoice)
+                    : 0;
+                if (prevIndex > 0) lastBehavChoice = null; // consumed
+
+                const behavChoice = await showBehaviorMenu(prevIndex);
+                if (!behavChoice) break; // esc back to top menu
+                lastBehavChoice = behavChoice; // remember for next rebuild
+                const handler = choiceHandlers[behavChoice];
+                if (handler) await handler();
+            }
+        } else {
+            // Direct action from top level (e.g. reset-defaults)
+            const handler = choiceHandlers[topChoice];
+            if (handler) await handler();
+        }
     }
 }
 
@@ -411,7 +555,7 @@ async function handleReviewerModelSelection(
                     };
                 });
 
-                const selectList = new SelectList(displayItems, Math.min(displayItems.length, 12), {
+                const selectList = new SelectList(displayItems, Math.min(displayItems.length, 18), {
                     selectedPrefix: (t) => theme.fg("accent", t),
                     selectedText: (t) => theme.fg("accent", t),
                     description: (t) => theme.fg("muted", t),
@@ -442,7 +586,7 @@ async function handleReviewerModelSelection(
                     }
                 };
             },
-            { overlay: true, overlayOptions: { anchor: "center", width: "50%", margin: 2 } }
+            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 2 } }
         );
 
         if (!selected) return; // cancelled
@@ -514,7 +658,7 @@ async function showTextInputDialog(
                 }
             };
         },
-        { overlay: true, overlayOptions: { anchor: "center", width: "50%", margin: 2 } }
+        { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 2 } }
     );
 }
 
@@ -720,7 +864,7 @@ async function handleCodeReviewModelSelection(
                     };
                 });
 
-                const selectList = new SelectList(displayItems, Math.min(displayItems.length, 12), {
+                const selectList = new SelectList(displayItems, Math.min(displayItems.length, 18), {
                     selectedPrefix: (t) => theme.fg("accent", t),
                     selectedText: (t) => theme.fg("accent", t),
                     description: (t) => theme.fg("muted", t),
@@ -747,7 +891,7 @@ async function handleCodeReviewModelSelection(
                     }
                 };
             },
-            { overlay: true, overlayOptions: { anchor: "center", width: "50%", margin: 2 } }
+            { overlay: true, overlayOptions: { anchor: "center", width: "60%", margin: 2 } }
         );
 
         if (!selected) return;
