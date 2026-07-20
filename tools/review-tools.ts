@@ -6,7 +6,7 @@ import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG } from "
 import { refreshBorder } from "../ui/ui";
 import { resetLoopState } from "../process/loop-detector";
 import { buildFinalReviewMessage, notifyOrchestrator } from "../runner/utils";
-import { transitionTo } from "../core/state-machine";
+import { transitionTo, isActive as stateIsActive } from "../core/state-machine";
 
 /** Plan status that permits goal approval (verification phase). */
 const REVIEW_STATUS = "verifying";
@@ -28,7 +28,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
         }),
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
@@ -76,7 +76,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
         description: "Complete the code review phase and proceed to final verification. Only callable during the REVIEWING phase.",
         parameters: Type.Object({}),
         async execute() {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 

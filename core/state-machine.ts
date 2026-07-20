@@ -160,3 +160,27 @@ export function mapPlanStatusToState(status: OrchestrationPlan["status"]): Orche
 export function getValidTransitionsFrom(state: OrchestrationState): Array<OrchestrationState> {
   return STATE_TRANSITIONS[state] || [];
 }
+
+// ---------------------------------------------------------------------------
+// State predicates — pure functions derived from the canonical state enum.
+// Replace all usage of OrchestratorState.isActive / .planningMode / .isExecuting.
+// ---------------------------------------------------------------------------
+
+/** Orchestrator has been activated (any state other than inactive). */
+export function isActive(state: OrchestrationState): boolean {
+  return state !== "inactive";
+}
+
+/** Orchestrator is in a planning-phase state (building or reviewing the plan). */
+export function isPlanningMode(state: OrchestrationState): boolean {
+  return state === "planning" || state === "reviewing" || state === "reviewed";
+}
+
+/** Orchestrator is in an execution-phase state (any active implementation lifecycle state). */
+export function isExecutingMode(state: OrchestrationState): boolean {
+  const executingStates: OrchestrationState[] = [
+    "setup", "replanning", "implementing", "pausing", "paused",
+    "resuming", "failed", "verifying", "code_review"
+  ];
+  return executingStates.includes(state);
+}

@@ -9,7 +9,7 @@ import {
     DEFAULT_SUB_AGENT_MAX_TURNS
 } from "./types";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
-import { getCurrentOrchestrationState, transitionTo, type OrchestrationState } from "./state-machine";
+import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, isPlanningMode, isExecutingMode, type OrchestrationState } from "./state-machine";
 
 /**
  * Central orchestrator state singleton.
@@ -18,33 +18,11 @@ import { getCurrentOrchestrationState, transitionTo, type OrchestrationState } f
  * External modules should NOT directly assign properties on this object. Use the
  * setter functions exported from `core.ts` (`setOrchestrationMode`, `resetState`,
  * `beginShutdown`, etc.) or the settings-menu setters for configuration values.
- * Direct property reads are acceptable for guards (e.g., `if (!OrchestratorState.isActive)`).
+ * Direct property reads are acceptable for guards using state predicates
+ * (e.g., `isActive(OrchestratorState.currentState)`).
  */
 export const OrchestratorState = {
     currentState: "inactive" as OrchestrationState,
-    get isActive(): boolean {
-        return this.currentState !== "inactive";
-    },
-    get isExecuting(): boolean {
-        return (
-            this.currentState === "setup" ||
-            this.currentState === "replanning" ||
-            this.currentState === "implementing" ||
-            this.currentState === "pausing" ||
-            this.currentState === "paused" ||
-            this.currentState === "resuming" ||
-            this.currentState === "failed" ||
-            this.currentState === "verifying" ||
-            this.currentState === "code_review"
-        );
-    },
-    get planningMode(): boolean {
-        return (
-            this.currentState === "planning" ||
-            this.currentState === "reviewing" ||
-            this.currentState === "reviewed"
-        );
-    },
     pi: undefined as ExtensionAPI | undefined,
     theme: null as Theme | null,
     simpleTaskModel: null as ModelRef | null,
@@ -135,9 +113,9 @@ export function setOrchestrationMode(
     const mode: "inactive" | "planning" | "executing" | "idle" =
         state === "inactive"
             ? "inactive"
-            : OrchestratorState.planningMode
+            : isPlanningMode(state)
               ? "planning"
-              : OrchestratorState.isExecuting
+              : isExecutingMode(state)
                 ? "executing"
                 : "idle";
 
@@ -162,7 +140,7 @@ export function getPi(): ExtensionAPI {
 export function requireActive(ctx: {
     ui: { notify: (msg: string, type?: "error" | "warning" | "info") => void };
 }): boolean {
-    if (!OrchestratorState.isActive) {
+    if (!stateIsActive(OrchestratorState.currentState)) {
         ctx.ui.notify(NOT_ACTIVE_MSG, "warning");
         return false;
     }
@@ -469,17 +447,17 @@ export function updateActiveTools(pi: ExtensionAPI) {
     const allTools = pi.getAllTools();
     const BASE_TOOLS = ["read", "ls", "grep", "find"];
 
-    if (!OrchestratorState.isActive) {
+    if (!stateIsActive(OrchestratorState.currentState)) {
         // Inactive - hide all orchestration tools
         const orchestratorToolNames = getAllOrchestrationToolNames();
         const active = allTools.filter((t) => !orchestratorToolNames.includes(t.name)).map((t) => t.name);
         pi.setActiveTools(active);
-    } else if (OrchestratorState.planningMode) {
+    } else if (isPlanningMode(OrchestratorState.currentState)) {
         // Planning - exploration tools + plan management only.
         // Block/task manipulation is gated until user approves via /om-accept.
         const active = allTools.filter((t) => [...BASE_TOOLS, ...PLANNING_TOOLS].includes(t.name)).map((t) => t.name);
         pi.setActiveTools(active);
-    } else if (OrchestratorState.isExecuting) {
+    } else if (isExecutingMode(OrchestratorState.currentState)) {
         // Executing - show execution tools only (plan writing is gated; plan is already approved)
         const active = allTools.filter((t) => [...BASE_TOOLS, ...EXECUTION_TOOLS].includes(t.name)).map((t) => t.name);
         pi.setActiveTools(active);
@@ -692,9 +670,10 @@ export function buildStatusSummary(plan: OrchestrationPlan): string {
     const parts: string[] = [];
 
     // Show phase/status indicator with granular label when in execution
-    if (OrchestratorState.planningMode) {
+    const state = OrchestratorState.currentState;
+    if (isPlanningMode(state)) {
         parts.push(`Orchestration Status: planning`);
-    } else if (OrchestratorState.isExecuting) {
+    } else if (isExecutingMode(state)) {
         const phase = computeExecutionPhaseLabel(plan);
         const label = phase ? `${phase.toLowerCase()}` : plan.status;
         parts.push(`Orchestration Status: ${label}`);

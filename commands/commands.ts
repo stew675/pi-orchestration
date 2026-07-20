@@ -16,6 +16,7 @@ import {
     enterPlanningMode,
     exitPlanningMode
 } from "../core";
+import { isActive as stateIsActive, isPlanningMode, isExecutingMode } from "../core/state-machine";
 import { showOrchestratorStatus, setOrchestrationEditor, clearUI, refreshBorder } from "../ui/ui";
 import { openSettingsMenu } from "../settings/settings-menu";
 import { AcceptOrEditDialog } from "../ui/accept-or-edit-dialog";
@@ -351,7 +352,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
         description: "Toggle orchestration mode on/off",
         handler: async (_args, ctx) => {
             // --- Toggle OFF ---
-            if (OrchestratorState.isActive) {
+            if (stateIsActive(OrchestratorState.currentState)) {
                 const ok = await ctx.ui.confirm(
                     "Exit orchestration mode",
                     "Stop all running sub-agents and return to normal Pi mode?\nPlan will be preserved on disk for later resume."
@@ -586,7 +587,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (!requireActive(ctx)) return;
 
             // --- Toggle OFF (exit planning mode) ---
-            if (OrchestratorState.planningMode) {
+            if (isPlanningMode(OrchestratorState.currentState)) {
                 await exitPlanningMode(pi, ctx);
                 setOrchestrationMode("inactive", pi, refreshBorder);
                 ctx.ui.notify("Planning mode exited. Implementation plan preserved on disk.", "info");
@@ -596,7 +597,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             // --- Toggle ON (enter planning mode) ---
             // Guard: cannot enter planning while execution is active
             const plan = StateManager.loadPlan();
-            if (OrchestratorState.isExecuting && plan && ["implementing", "paused", "pausing"].includes(plan.status)) {
+            if (isExecutingMode(OrchestratorState.currentState) && plan && ["implementing", "paused", "pausing"].includes(plan.status)) {
                 ctx.ui.notify(
                     "Cannot enter planning mode while orchestration is running.\nUse /om-pause or /om-stop first.",
                     "warning"

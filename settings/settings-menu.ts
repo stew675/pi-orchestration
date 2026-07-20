@@ -10,6 +10,7 @@ import {
     setSubAgentMaxTurns,
     setBooleanSetting
 } from "../core";
+import { isActive as stateIsActive, isPlanningMode } from "../core/state-machine";
 import { persistSettings, resetToDefaults } from "./settings";
 import { createModelPicker } from "../ui/model-picker";
 import { parseTimeout, formatTimeout } from "./time-utils";
@@ -316,13 +317,13 @@ async function handleModelSelection(
 
             const label = scopeInfo.label;
 
-            if (OrchestratorState.isActive && (scope === "orchestration" || scope === "planning")) {
+            if (stateIsActive(OrchestratorState.currentState) && (scope === "orchestration" || scope === "planning")) {
                 // Only live-switch when the selected scope matches the current active mode:
                 //   planning model → while in planning mode
                 //   orchestration model → while NOT in planning mode (idle or executing)
                 const shouldLiveSwitch =
-                    (scope === "planning" && OrchestratorState.planningMode) ||
-                    (scope === "orchestration" && !OrchestratorState.planningMode);
+                    (scope === "planning" && isPlanningMode(OrchestratorState.currentState)) ||
+                    (scope === "orchestration" && !isPlanningMode(OrchestratorState.currentState));
 
                 if (shouldLiveSwitch) {
                     const liveModel =

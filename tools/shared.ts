@@ -1,6 +1,6 @@
 import { StateManager } from "../context/state-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
-import { getCurrentOrchestrationState } from "../core/state-machine";
+import { getCurrentOrchestrationState, isPlanningMode, isActive as stateIsActive } from "../core/state-machine";
 import {
     detectCycle,
     detectFileConflicts,
@@ -154,7 +154,7 @@ export function validateDeleteTask(plan: any, taskId: string): void {
 
 /** Reject task manipulation during planning mode. */
 export function requireExecutionMode() {
-    if (OrchestratorState.planningMode) {
+    if (isPlanningMode(OrchestratorState.currentState)) {
         throw new Error(
             "Blocked during planning mode. Present your plan to the user and ask them to run /om-accept for approval before manipulating tasks."
         );
@@ -199,7 +199,7 @@ export function isBuildTask(description: string): boolean {
 /** Combined prerequisite check for task CRUD tools: isActive + exec mode + plan not executing. */
 /** Combined prerequisite check for task CRUD tools: isActive + exec mode + setup/replanning gating. */
 export function requireTaskCrudPrereqs() {
-    if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+    if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
     requireExecutionMode();
     
     const state = OrchestratorState.currentState;

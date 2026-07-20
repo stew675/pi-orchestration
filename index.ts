@@ -42,7 +42,7 @@ import {
     resetLoopBreakerFlag,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
-import { transitionTo } from "./core/state-machine";
+import { transitionTo, isActive, isPlanningMode, isExecutingMode } from "./core/state-machine";
 
 import {
     ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
@@ -84,9 +84,7 @@ export default function (pi: ExtensionAPI) {
                 // Watchdog: Kick the orchestrator if it stalls during execution mode.
                 const plan = StateManager.loadPlan();
                 if (
-                    !OrchestratorState.isActive ||
-                    !OrchestratorState.isExecuting ||
-                    OrchestratorState.planningMode ||
+                    !isExecutingMode(OrchestratorState.currentState) ||
                     OrchestratorState._manualPause ||
                     !isAgentIdle ||
                     activeProcesses.size > 0 ||
@@ -188,7 +186,7 @@ export default function (pi: ExtensionAPI) {
             };
         }
 
-        if (OrchestratorState.isActive) {
+        if (isActive(OrchestratorState.currentState)) {
             // Capture the original system prompt on the first orchestration turn
             if (OrchestratorState.originalSystemPrompt === undefined) {
                 OrchestratorState.originalSystemPrompt = event.systemPrompt;
@@ -199,7 +197,7 @@ export default function (pi: ExtensionAPI) {
                 return { systemPrompt: ORCHESTRATOR_REVIEW_SYSTEM_PROMPT };
             }
 
-            if (OrchestratorState.isExecuting) {
+            if (isExecutingMode(OrchestratorState.currentState)) {
                 const plan = StateManager.loadPlan();
                 if (plan && plan.status === "code_review") {
                     return { systemPrompt: ORCHESTRATOR_CODE_REVIEW_DECISION_SYSTEM_PROMPT };
@@ -229,7 +227,7 @@ export default function (pi: ExtensionAPI) {
      *  Only orchestrate_write_plan injects a quality hint (one-shot).
      *  Dialog / review triggering is handled by orchestrate_present_plan, not write/edit. */
     pi.on("tool_result", async (event, _ctx) => {
-        if (!OrchestratorState.isActive || !OrchestratorState.planningMode || event.isError) return;
+        if (!isPlanningMode(OrchestratorState.currentState) || event.isError) return;
 
         if (event.toolName === "orchestrate_write_plan") {
             // Inject pre-write quality hint on first call (one-shot).
@@ -246,7 +244,7 @@ export default function (pi: ExtensionAPI) {
         } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
             // Reviewer finished — queue back to planning model and instruct planner to process review.
             OrchestratorState._pendingReviewCompletion = true;
-        } else if (event.toolName === "orchestrate_approve_goal" && OrchestratorState.isExecuting) {
+        } else if (event.toolName === "orchestrate_approve_goal" && isExecutingMode(OrchestratorState.currentState)) {
             // Final approval - transition to completed state
             const plan = StateManager.loadPlan();
             if (plan) {
@@ -271,7 +269,7 @@ export default function (pi: ExtensionAPI) {
     /** Show Accept/Edit dialog only when the agent has fully settled (no retries/compaction/follow-ups left).
      *  This avoids false triggers from auto-retry or auto-compaction cycles that also fire turn_end. */
     pi.on("agent_settled", async (_event, ctx) => {
-        if (!OrchestratorState.isActive || !OrchestratorState.planningMode) return;
+        if (!isPlanningMode(OrchestratorState.currentState)) return;
 
         if (OrchestratorState._pendingReviewStart) {
             OrchestratorState._pendingReviewStart = false;
@@ -342,7 +340,7 @@ export default function (pi: ExtensionAPI) {
 
     /** Track orchestrator tool calls per turn for loop detection. */
     pi.on("tool_execution_start", (event) => {
-        if (!OrchestratorState.isActive || !OrchestratorState.isExecuting || OrchestratorState.planningMode) return;
+        if (!isExecutingMode(OrchestratorState.currentState)) return;
 
         recordToolExecution(event.toolCallId, event.toolName, event.args || {});
     });
@@ -352,9 +350,7 @@ export default function (pi: ExtensionAPI) {
     pi.on("turn_end", async (_event, _ctx) => {
         // --- Orchestrator loop detection (execution mode only, after task assignment phase) ---
         if (
-            OrchestratorState.isActive &&
-            OrchestratorState.isExecuting &&
-            !OrchestratorState.planningMode &&
+            isExecutingMode(OrchestratorState.currentState) &&
             isPastTaskAssignmentPhase()
         ) {
             const signature = buildTurnSignature();

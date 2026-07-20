@@ -5,6 +5,7 @@ import { StateManager } from "../context/state-manager";
 import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
 import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
+import { isActive as stateIsActive } from "../core/state-machine";
 import type { Task, TaskType } from "../core/types";
 import { healDependenciesOnDelete } from "../validation/validation";
 import {
@@ -445,7 +446,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         parameters: Type.Object({}),
         executionMode: "sequential",
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
-            if (!OrchestratorState.isActive) throw new Error(NOT_ACTIVE_MSG);
+            if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
             const md = StateManager.getMarkdownPlan();
             if (!md) return { content: [{ type: "text", text: "No plan exists yet." }], details: {} };
