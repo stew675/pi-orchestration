@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PersistenceManager, drainPlanChangeListeners, startPlanSaveTimer, stopPlanSaveTimer } from "./context/persistence";
+import { PersistenceManager, drainPlanChangeListeners, startPlanSaveTimer, stopPlanSaveTimer, wirePlanPersistence } from "./context/persistence";
 import { Runner } from "./runner";
 import { killAllProcesses, activeProcesses } from "./process/process-manager";
 import {
@@ -7,11 +7,13 @@ import {
     updateActiveTools,
     resetState,
     beginShutdown,
-    recoverInterruptedTasks,
     requireActive,
     switchToReviewerModel,
-    restoreFromReviewPhase
+    restoreFromReviewPhase,
+    setPlanDb,
+    getPlanDb
 } from "./core";
+import { PlanDatabase } from "./core/plan-database";
 import {
     registerEnableCommand,
     registerOrchestrationCommands,
@@ -82,7 +84,7 @@ export default function (pi: ExtensionAPI) {
 
                 // --- Orchestrator stall detection ---
                 // Watchdog: Kick the orchestrator if it stalls during execution mode.
-                const plan = OrchestratorState.plan;
+                const plan = getPlanDb()?.toJSON() ?? null;
                 if (
                     !isExecutingMode(OrchestratorState.currentState) ||
                     ["paused", "stopped", "pausing"].includes(OrchestratorState.currentState) ||
@@ -123,8 +125,11 @@ export default function (pi: ExtensionAPI) {
 
         // Just notify about an existing plan - don't auto-activate orchestration.
         // The user must explicitly run /om-enable to proceed.
-        OrchestratorState.plan = PersistenceManager.loadPlan();
-        const plan = OrchestratorState.plan;
+        const parsedPlan = PersistenceManager.loadPlan();
+        setPlanDb(parsedPlan ? new PlanDatabase(parsedPlan) : null);
+        wirePlanPersistence();
+
+        const plan = getPlanDb()?.toJSON() ?? null;
         if (plan) {
             const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
             if (inferred !== "completed") {
@@ -159,11 +164,12 @@ export default function (pi: ExtensionAPI) {
         drainPlanChangeListeners();
 
         // Recover in-flight tasks and save them back to 'pending' on disk
-        if (OrchestratorState.plan) {
-            const recovered = recoverInterruptedTasks();
+        const planDb = getPlanDb();
+        if (planDb) {
+            const recovered = planDb.recoverInterruptedTasks();
             if (recovered > 0) {
                 try {
-                    PersistenceManager.savePlan(OrchestratorState.plan);
+                    PersistenceManager.savePlan(planDb.toJSON());
                 } catch (e) {
                     notifyTuiOnly(pi, "Failed to persist recovered tasks during shutdown: " + String(e));
                 }
@@ -363,15 +369,12 @@ export default function (pi: ExtensionAPI) {
                 );
 
                 // Force transition to completed and notify user.
-                const plan = OrchestratorState.plan;
-                if (plan) {
+                const planDb = getPlanDb();
+                if (planDb) {
                     try {
                         import("./core/state-machine").then(({ transitionTo }) => {
                             transitionTo("completed");
-                            plan.attributes = plan.attributes || [];
-                            if (!plan.attributes.includes("VERIFIED")) {
-                                plan.attributes.push("VERIFIED");
-                            }
+                            planDb.transaction((tx) => tx.setAttribute("VERIFIED"));
                         });
                     } catch (e) {
                         notifyTuiOnly(pi, "Failed during force-approve: " + String(e));

@@ -4,7 +4,8 @@ import * as os from "node:os";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef, Task } from "../core/types";
 import { MAX_CLARIFICATIONS, isTaskReadOnly } from "../core/types";
-import { OrchestratorState, resolveTaskModelByComplexity, resolveValidatorModel, resolveSummaryModel } from "../core";
+import { OrchestratorState, resolveTaskModelByComplexity, resolveValidatorModel, resolveSummaryModel, getPlanDb } from "../core";
+import type { PlanTransaction } from "../core/plan-database";
 import { PersistenceManager } from "../context/persistence";
 import { buildTaskContext } from "../context/context-builder";
 import * as monitor from "../process/monitor";
@@ -33,30 +34,30 @@ export async function executeTask(
 
         // When resuming after clarification, check status
         if (clarificationData && clarificationData.taskId !== task.id) {
-            const refreshedPlan = OrchestratorState.plan;
-            if (refreshedPlan) {
-                const refreshedTask = refreshedPlan.tasks.find((t) => t.id === task.id);
+            const planDb = getPlanDb();
+            if (planDb) {
+                const refreshedTask = planDb.getTask(task.id);
                 if (refreshedTask && refreshedTask.status === "completed") return true;
             }
         }
 
-        // Use canonical in-memory plan
-        const currentPlan = OrchestratorState.plan;
-        if (!currentPlan) return false;
-
+        // Hard stop check (before any mutation)
         const currentState = getCurrentOrchestrationState();
-
-        // Hard stop
         if (currentState === "paused" || currentState === "failed") {
             return false;
         }
 
-        const planTask = currentPlan.tasks.find((t) => t.id === task.id);
-        if (!planTask) return false;
+        const planDb = getPlanDb();
+        if (!planDb) return false;
 
-        planTask.status = "running";
-        planTask.startedAt = Date.now();
-        currentPlan.currentTaskId = task.id;
+        // Verify task exists in the database
+        if (!planDb.hasTask(task.id)) return false;
+
+        // Mark task as running and set current task id via transaction
+        planDb.transaction((tx: PlanTransaction) => {
+            tx.updateTask(task.id, { status: "running", startedAt: Date.now() });
+            tx.setCurrentTaskId(task.id);
+        });
 
         // Inform user via UI
         pi?.sendMessage(
@@ -81,15 +82,15 @@ export async function executeTask(
 
         // Reset orphaned task status so scheduler can retry on next cycle.
         try {
-            const p = OrchestratorState.plan;
-            if (p) {
-                const t = p.tasks.find((x) => x.id === task.id);
-                if (t && t.status === "running") {
-                    t.status = "pending";
-                    t.attempts++;
-                    delete t.startedAt;
-                    notifyTuiOnly(pi || OrchestratorState.pi, `Task ${task.id} reset from 'running' to 'pending' after unexpected error.`);
-                }
+            const planDb = getPlanDb();
+            if (planDb && planDb.hasTask(task.id)) {
+                planDb.transaction((tx: PlanTransaction) => {
+                    const t = tx.getTask(task.id);
+                    if (t && t.status === "running") {
+                        tx.updateTask(task.id, { status: "pending", attempts: (t.attempts ?? 0) + 1, startedAt: undefined });
+                        notifyTuiOnly(pi || OrchestratorState.pi, `Task ${task.id} reset from 'running' to 'pending' after unexpected error.`);
+                    }
+                });
             }
         } catch (resetErr) {
             notifyTuiOnly(pi || OrchestratorState.pi, `Failed to reset task ${task.id} status: ${String(resetErr)}`);
@@ -106,7 +107,10 @@ export async function executeTask(
 }
 
 /** Handle clarification request from sub-agent. Returns true if caller should stop processing. */
-function handleClarification(task: Task, clarificationFile: string): boolean {
+function handleClarification(taskId: string, clarificationFile: string): boolean {
+    const planDb = getPlanDb();
+    if (!planDb) return false;
+
     if (!fs.existsSync(clarificationFile)) return false;
 
     try {
@@ -116,42 +120,63 @@ function handleClarification(task: Task, clarificationFile: string): boolean {
         const cData = JSON.parse(cContent);
         if (!(cData && typeof cData === "object" && typeof cData.query === "string")) return false;
 
-        task.clarificationAttempts = (task.clarificationAttempts || 0) + 1;
+        // Perform clarification logic inside a transaction for atomicity
+        planDb.transaction((tx: PlanTransaction) => {
+            const t = tx.getTask(taskId);
+            if (!t) return;
 
-        if (task.clarificationAttempts > MAX_CLARIFICATIONS) {
-            const elapsed = task.startedAt ? `${((Date.now() - task.startedAt) / 1000).toFixed(0)}s` : "?";
-            task.status = "failed";
-            task.validatorFeedback = `Task requested clarification ${task.clarificationAttempts} times (max ${MAX_CLARIFICATIONS}). Aborting. (ran for ${elapsed})`;
-        } else {
-            task.status = "awaiting_clarification";
-            task.clarificationQuery = cData.query;
-        }
+            const newAttempts = (t.clarificationAttempts || 0) + 1;
+
+            if (newAttempts > MAX_CLARIFICATIONS) {
+                const elapsed = t.startedAt ? `${((Date.now() - t.startedAt) / 1000).toFixed(0)}s` : "?";
+                tx.updateTask(taskId, {
+                    status: "failed",
+                    clarificationAttempts: newAttempts,
+                    validatorFeedback: `Task requested clarification ${newAttempts} times (max ${MAX_CLARIFICATIONS}). Aborting. (ran for ${elapsed})`
+                });
+            } else {
+                tx.updateTask(taskId, {
+                    status: "awaiting_clarification",
+                    clarificationQuery: cData.query,
+                    clarificationAttempts: newAttempts
+                });
+            }
+        });
     } catch (e) {
-        task.status = "failed";
-        task.validatorFeedback = `Sub-agent attempted to write clarification but the file was invalid/malformed: ${(e as Error).message}`;
+        planDb.transaction((tx: PlanTransaction) => {
+            tx.updateTask(taskId, {
+                status: "failed",
+                validatorFeedback: `Sub-agent attempted to write clarification but the file was invalid/malformed: ${(e as Error).message}`
+            });
+        });
     }
 
     return true; // caller should stop regardless of outcome
 }
 
 /** Handle successful (code 0) sub-agent exit. Routes through validation and summarization. */
-async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, model?: ModelRef): Promise<void> {
-    // Work from the canonical in-memory plan
-    const p = OrchestratorState.plan;
-    if (!p) return;
-    const t = p.tasks.find((x) => x.id === task.id);
-    if (!t) return;
+async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, model?: ModelRef): Promise<void> {
+    const planDb = getPlanDb();
+    if (!planDb) return;
 
     // Guard: process exited cleanly but produced no assistant output (LLM may have crashed)
     if (!procResult.receivedAssistantMessage) {
-        const elapsed = t.startedAt != null ? ((Date.now() - t.startedAt) / 1000).toFixed(0) : "?";
-        const output = monitor.getCapturedLines(t.id);
-        t.status = "failed";
-        t.validatorFeedback = `Sub-agent process exited with code 0 but produced no assistant output (LLM may have crashed). Ran for ${elapsed}s.${output ? "\n\n" + output : ""}`;
+        planDb.transaction((tx: PlanTransaction) => {
+            const t = tx.getTask(taskId);
+            if (!t) return;
+            const elapsed = t.startedAt != null ? ((Date.now() - t.startedAt) / 1000).toFixed(0) : "?";
+            const output = monitor.getCapturedLines(t.id);
+            tx.updateTask(taskId, {
+                status: "failed",
+                validatorFeedback: `Sub-agent process exited with code 0 but produced no assistant output (LLM may have crashed). Ran for ${elapsed}s.${output ? "\n\n" + output : ""}`
+            });
+        });
         return;
     }
 
-    // Save plan with updated artifacts before continuing
+    // Work from the database snapshot to determine validation path
+    const t = planDb.getTask(taskId);
+    if (!t) return;
 
     const isReadOnly = isTaskReadOnly(t.taskType);
 
@@ -162,17 +187,21 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
         (t.complexity !== "simple" && OrchestratorState.validateComplexTasks);
 
     if (!shouldValidate) {
-        await completeTaskWithSummary(t, resolveSummaryModel(model), monitor.getFullTranscript(t.id));
+        await completeTaskWithSummary(
+            planDb.getTask(taskId)!,
+            resolveSummaryModel(model),
+            monitor.getFullTranscript(taskId)
+        );
         return;
     }
 
     // --- Validation phase ---
-    t.status = "validating";
+    planDb.transaction((tx: PlanTransaction) => { tx.updateTask(taskId, { status: "validating" }); });
 
     const filesToValidate = t.result?.artifacts ?? (t.files || []);
-    const fullTranscript = monitor.getFullTranscript(t.id);
+    const fullTranscript = monitor.getFullTranscript(taskId);
     const validatorResult = await validateTask(
-        t.id,
+        taskId,
         t.description,
         filesToValidate,
         resolveValidatorModel(model),
@@ -182,13 +211,18 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
 
     if (validatorResult.pass) {
         if (isReadOnly) {
-            t.status = "completed";
-            t.result = {
-                ...(t.result || {}),
-                summary: procResult.lastAssistantText || "Read-only task executed successfully."
-            };
+            planDb.transaction((tx: PlanTransaction) => {
+                tx.updateTask(taskId, {
+                    status: "completed",
+                    result: { summary: procResult.lastAssistantText || "Read-only task executed successfully." }
+                });
+            });
         } else {
-            await completeTaskWithSummary(t, resolveSummaryModel(model), fullTranscript);
+            await completeTaskWithSummary(
+                planDb.getTask(taskId)!,
+                resolveSummaryModel(model),
+                fullTranscript
+            );
         }
         return;
     }
@@ -204,12 +238,24 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
 
     if (isRecoverable && !isReadOnly) {
         // Auto-complete with validator note appended to summary
-        notifyTuiOnly(OrchestratorState.pi, `[validator ${t.id}] Recoverable failure - auto-completing. Feedback: ${feedback}`);
-        t.validatorFeedback = `Validator noted: ${feedback} (auto-completed; sub-agent exited cleanly)`;
-        await completeTaskWithSummary(t, resolveSummaryModel(model), fullTranscript);
+        notifyTuiOnly(OrchestratorState.pi, `[validator ${taskId}] Recoverable failure - auto-completing. Feedback: ${feedback}`);
+        planDb.transaction((tx: PlanTransaction) => {
+            tx.updateTask(taskId, {
+                validatorFeedback: `Validator noted: ${feedback} (auto-completed; sub-agent exited cleanly)`
+            });
+        });
+        await completeTaskWithSummary(
+            planDb.getTask(taskId)!,
+            resolveSummaryModel(model),
+            fullTranscript
+        );
     } else {
-        t.status = "failed";
-        t.validatorFeedback = feedback || "Validation failed without feedback.";
+        planDb.transaction((tx: PlanTransaction) => {
+            tx.updateTask(taskId, {
+                status: "failed",
+                validatorFeedback: feedback || "Validation failed without feedback."
+            });
+        });
     }
 }
 
@@ -220,8 +266,10 @@ async function runTaskSubAgent(
     clarificationData?: { taskId: string; answer: string },
     _pi?: ExtensionAPI
 ): Promise<void> {
-    const plan = OrchestratorState.plan;
-    if (!plan) return;
+    const planDb = getPlanDb();
+    if (!planDb) return;
+
+    const taskId = task.id;
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-orch-"));
     const promptFile = path.join(tempDir, "prompt.md");
@@ -231,13 +279,13 @@ async function runTaskSubAgent(
         // Build rich context for the sub-agent.
         const relevantClarification =
             clarificationData && clarificationData.taskId === task.id ? clarificationData : undefined;
-        const context = buildTaskContext(plan, task, clarificationFile, relevantClarification);
+        const context = buildTaskContext(planDb.toJSON(), task, clarificationFile, relevantClarification);
         fs.writeFileSync(promptFile, context, "utf-8");
-        PersistenceManager.persistTaskPrompt(task.id, context);
+        PersistenceManager.persistTaskPrompt(taskId, context);
 
         // Spawn and wait for the sub-agent process.
         const procResult = await runSubAgent({
-            taskId: task.id,
+            taskId: taskId,
             promptFile,
             description: task.description,
             taskType: task.taskType,
@@ -247,56 +295,76 @@ async function runTaskSubAgent(
 
         // Register the persistent log file with the monitor so downstream code can reference it.
         if (procResult.logFile) {
-            monitor.setTaskLogFile(task.id, procResult.logFile);
+            monitor.setTaskLogFile(taskId, procResult.logFile);
         }
 
         if (OrchestratorState.shuttingDown) {
             return;
         }
 
-        const p = OrchestratorState.plan;
-        if (!p) return;
-
-        const t = p.tasks.find((x) => x.id === task.id);
+        // Use PlanDatabase for all mutations; read from database for initial task data
+        const t = planDb.getTask(taskId);
         if (!t) return;
 
-        // Update files & artifacts
+        // Update files & artifacts via transaction
         const allRelevantFiles = new Set([...(t.files || []), ...procResult.discoveredArtifacts]);
-        t.result = { summary: t.result?.summary || "", artifacts: Array.from(allRelevantFiles) };
+        planDb.transaction((tx: PlanTransaction) => {
+            tx.updateTask(taskId, {
+                result: { summary: t.result?.summary || "", artifacts: Array.from(allRelevantFiles) }
+            });
+        });
 
         // Handle spawn error first
         if (procResult.spawnError) {
-            t.status = "failed";
-            t.validatorFeedback = `Failed to spawn sub-agent: ${procResult.spawnError.message}`;
+            const spawnMessage = procResult.spawnError.message;
+            planDb.transaction((tx: PlanTransaction) => {
+                tx.updateTask(taskId, {
+                    status: "failed",
+                    validatorFeedback: `Failed to spawn sub-agent: ${spawnMessage}`
+                });
+            });
             return;
         }
 
         // --- Post-process: route by exit status (early returns) ---
 
-        if (await handleClarification(t, clarificationFile)) {
+        if (await handleClarification(taskId, clarificationFile)) {
             return;
         }
 
         const elapsedMs = t.startedAt != null ? Date.now() - t.startedAt : 0;
         const elapsedStr = `${(elapsedMs / 1000).toFixed(0)}s`;
-        const output = monitor.getCapturedLines(task.id);
+        const output = monitor.getCapturedLines(taskId);
 
         if (procResult.killed) {
             // Check if the watchdog killed this agent for idle/turns reasons.
-            const taggedId = `implementation-${task.id}`;
+            const taggedId = `implementation-${taskId}`;
             const monState = monitor.getMonitoredAgent(taggedId);
             const killReason = monState?.killedByWatchdog ?? null;
 
-            t.status = "failed";
-            if (killReason === "idle_timeout") {
-                t.validatorFeedback = `Sub-agent idle timeout — no JSON stream activity for ${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)} (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
-            } else if (killReason === "max_turns") {
-                t.validatorFeedback = `Sub-agent exceeded max turns limit of ${OrchestratorState.subAgentMaxTurns} (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
-            } else if (procResult.loopKilled) {
-                t.validatorFeedback = `Sub-agent killed due to repetitive loop (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
-            } else {
-                t.validatorFeedback = `Sub-agent timed out after ${task.timeoutMs ?? OrchestratorState.taskTimeoutMs}ms (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`;
-            }
+            planDb.transaction((tx: PlanTransaction) => {
+                if (killReason === "idle_timeout") {
+                    tx.updateTask(taskId, {
+                        status: "failed",
+                        validatorFeedback: `Sub-agent idle timeout — no JSON stream activity for ${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)} (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`
+                    });
+                } else if (killReason === "max_turns") {
+                    tx.updateTask(taskId, {
+                        status: "failed",
+                        validatorFeedback: `Sub-agent exceeded max turns limit of ${OrchestratorState.subAgentMaxTurns} (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`
+                    });
+                } else if (procResult.loopKilled) {
+                    tx.updateTask(taskId, {
+                        status: "failed",
+                        validatorFeedback: `Sub-agent killed due to repetitive loop (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`
+                    });
+                } else {
+                    tx.updateTask(taskId, {
+                        status: "failed",
+                        validatorFeedback: `Sub-agent timed out after ${task.timeoutMs ?? OrchestratorState.taskTimeoutMs}ms (ran for ${elapsedStr})${output ? "\n\n" + output : ""}`
+                    });
+                }
+            });
 
             // Transition to failed state
             if (!transitionTo("failed")) {
@@ -307,15 +375,19 @@ async function runTaskSubAgent(
         }
 
         if (procResult.code !== 0) {
-            t.status = "failed";
-            let feedback = `Sub-agent process exited with code ${procResult.code} (ran for ${elapsedStr})`;
-            if (procResult.stderrDiagnostics) {
-                feedback += `\n\n[Raw Stderr Output]:\n${procResult.stderrDiagnostics}`;
-            }
-            if (output) {
-                feedback += `\n\n[Captured Events]:\n${output}`;
-            }
-            t.validatorFeedback = feedback;
+            planDb.transaction((tx: PlanTransaction) => {
+                let feedback = `Sub-agent process exited with code ${procResult.code} (ran for ${elapsedStr})`;
+                if (procResult.stderrDiagnostics) {
+                    feedback += `\n\n[Raw Stderr Output]:\n${procResult.stderrDiagnostics}`;
+                }
+                if (output) {
+                    feedback += `\n\n[Captured Events]:\n${output}`;
+                }
+                tx.updateTask(taskId, {
+                    status: "failed",
+                    validatorFeedback: feedback
+                });
+            });
 
             // Transition to failed state
             if (!transitionTo("failed")) {
@@ -325,7 +397,7 @@ async function runTaskSubAgent(
             return;
         }
 
-        await handleSuccessfulExit(t, procResult, model);
+        await handleSuccessfulExit(taskId, procResult, model);
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }

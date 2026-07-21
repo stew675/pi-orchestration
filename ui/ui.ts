@@ -8,7 +8,8 @@ import {
     buildStatusSummary,
     computeExecutionPhaseLabel,
     stripTaskPrefix,
-    truncateToSentence
+    truncateToSentence,
+    PlanDatabase
 } from "../core";
 import { getCurrentOrchestrationState, isActive as stateIsActive, type OrchestrationState, inferStateFromTasks } from "../core/state-machine";
 import {
@@ -18,7 +19,7 @@ import {
     onMonitorChange,
     type ThemeLike
 } from "../process/monitor";
-import { MAX_CLARIFICATIONS, OrchestrationPlan, Task } from "../core/types";
+import { MAX_CLARIFICATIONS, Task } from "../core/types";
 
 // ---------------------------------------------------------------------------
 // OrchestrationEditor - extends CustomEditor to color the input border based
@@ -63,9 +64,9 @@ type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim"
 function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     if (!stateIsActive(OrchestratorState.currentState) || !OrchestratorState.theme) return null;
 
-    const plan = OrchestratorState.plan;
+    const planDb = OrchestratorState.planDb;
     // No plan yet - orchestration is active, so we're in the initial planning phase.
-    if (!plan) {
+    if (!planDb) {
         return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "mdHeading");
     }
 
@@ -132,8 +133,8 @@ export function refreshUiStatus(ctx?: ExtensionContext) {
 
     // Update footer status line
     if (stateIsActive(OrchestratorState.currentState)) {
-        const plan = OrchestratorState.plan;
-        if (plan) {
+        const planDb = OrchestratorState.planDb;
+        if (planDb) {
             targetCtx.ui.setStatus("orchestrator", buildStatusSummary());
         }
     }
@@ -201,26 +202,27 @@ function resolveStatusLabelAndColor(
 /** Strategy map for phase-detail message rendering. */
 const PHASE_DETAIL_RENDERERS: Record<
     string,
-    (lines: string[], plan: OrchestrationPlan, theme: { fg: (color: SemanticColor, text: string) => string }) => void
+    (lines: string[], planDb: PlanDatabase, theme: { fg: (color: SemanticColor, text: string) => string }) => void
 > = {
-    VERIFYING: (lines, _plan, t) => {
+    VERIFYING: (lines, _planDb, t) => {
         lines.push(t.fg("warning", "  -> Awaiting final verification by orchestrator"));
         lines.push(t.fg("dim", "  Use /om-resume to wake the reviewer if nothing happens"));
     },
-    PLAN_REVIEW: (lines, _plan, t) => {
+    PLAN_REVIEW: (lines, _planDb, t) => {
         lines.push(t.fg("warning", "  -> Plan review in progress"));
         lines.push(t.fg("dim", "  Reviewer model is evaluating the implementation plan"));
     },
-    CODE_REVIEW: (lines, _plan, t) => {
+    CODE_REVIEW: (lines, _planDb, t) => {
         lines.push(t.fg("warning", "  -> Code review in progress or actions required"));
         lines.push(t.fg("dim", "  Read .pi/orchestration/plans/code-review.md for findings"));
     },
-    SETUP: (lines, _plan, t) => {
+    SETUP: (lines, _planDb, t) => {
         lines.push(t.fg("warning", "  -> Setting up task execution environment"));
         lines.push(t.fg("dim", "  Tasks are being prepared for implementation"));
     },
-    REPLANNING: (lines, plan, t) => {
-        const clarifyingTask = plan.tasks?.find((t2: Task) => t2.status === "awaiting_clarification");
+    REPLANNING: (lines, planDb, t) => {
+        const tasks = planDb.getTasks();
+        const clarifyingTask = tasks.find((t2: Task) => t2.status === "awaiting_clarification");
         if (clarifyingTask) {
             const attempts = clarifyingTask.clarificationAttempts || 1;
             lines.push(
@@ -231,7 +233,7 @@ const PHASE_DETAIL_RENDERERS: Record<
             );
             lines.push(t.fg("dim", "  Use /om-resume to continue"));
         } else {
-            const failedTasks = plan.tasks?.filter((t2: Task) => t2.status === "failed") || [];
+            const failedTasks = tasks.filter((t2: Task) => t2.status === "failed");
             if (failedTasks.length > 0) {
                 lines.push(t.fg("error", `  -> ${failedTasks.length} task(s) failed - awaiting orchestrator decision`));
                 lines.push(t.fg("dim", "  Use /om-resume to wake the orchestrator"));
@@ -241,21 +243,21 @@ const PHASE_DETAIL_RENDERERS: Record<
             }
         }
     },
-    PAUSED: (lines, _plan, t) => {
+    PAUSED: (lines, _planDb, t) => {
         lines.push(t.fg("warning", "  -> Execution paused by user (/om-pause)"));
         lines.push(t.fg("dim", "  Use /om-resume to continue"));
     },
-    STOPPED: (lines, _plan, t) => {
+    STOPPED: (lines, _planDb, t) => {
         lines.push(t.fg("error", "  -> Execution stopped by user (/om-stop)"));
         lines.push(t.fg("dim", "  Use /om-resume to continue or /om-reset to start fresh"));
     },
-    PLANNING: (lines, _plan, t) => {
+    PLANNING: (lines, _planDb, t) => {
         lines.push(t.fg("text", "  -> Building plan..."));
     },
-    COMPLETED: (lines, _plan, t) => {
+    COMPLETED: (lines, _planDb, t) => {
         lines.push(t.fg("accent", "  -> All tasks completed. Orchestration finished."));
     },
-    FAILED: (lines, _plan, t) => {
+    FAILED: (lines, _planDb, t) => {
         lines.push(t.fg("error", "  -> Plan failed"));
         lines.push(t.fg("dim", "  Use /om-resume to recover or /om-enable"));
     }
@@ -264,11 +266,11 @@ const PHASE_DETAIL_RENDERERS: Record<
 function appendPhaseDetailMessages(
     lines: string[],
     phaseLabel: string | null | undefined,
-    plan: OrchestrationPlan,
+    planDb: PlanDatabase,
     theme: { fg: (color: SemanticColor, text: string) => string }
 ): void {
     if (phaseLabel && PHASE_DETAIL_RENDERERS[phaseLabel]) {
-        PHASE_DETAIL_RENDERERS[phaseLabel](lines, plan, theme);
+        PHASE_DETAIL_RENDERERS[phaseLabel](lines, planDb, theme);
     }
 }
 
@@ -288,25 +290,26 @@ function resolveTaskStatusColor(status: string): SemanticColor {
 
 /** @todo Extract active/pending/completed task rendering into separate functions for clarity. */
 function buildPlanDisplay(
-    plan: OrchestrationPlan,
+    planDb: PlanDatabase,
     theme: { fg: (color: SemanticColor, text: string) => string },
     options: PlanDisplayOptions = {}
 ): string[] {
     const { compact = false, detailed = false } = options;
-    const p = plan;
     const lines: string[] = [];
 
     // Header with status and goal
     const phaseLabel = computeExecutionPhaseLabel();
     const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
-    if (p.goal) {
-        lines.push(`Goal: ${p.goal}`);
+    const goal = planDb.getGoal();
+    if (goal) {
+        lines.push(`Goal: ${goal}`);
     }
 
     // Task progress bar
-    const totalTasks = p.tasks ? p.tasks.length : 0;
-    const completedTasks = p.tasks ? p.tasks.filter((t: Task) => t.status === "completed").length : 0;
+    const tasks = planDb.getTasks();
+    const totalTasks = tasks.length;
+    const completedTasks = tasks.filter((t: Task) => t.status === "completed").length;
     if (totalTasks > 0) {
         const barLen = compact ? 20 : 30;
         const filled = Math.round((completedTasks / totalTasks) * barLen);
@@ -315,12 +318,12 @@ function buildPlanDisplay(
     }
 
     // Phase-specific detail messages
-    appendPhaseDetailMessages(lines, phaseLabel, p, theme);
+    appendPhaseDetailMessages(lines, phaseLabel, planDb, theme);
 
-    if (p.tasks && p.tasks.length > 0) {
-        const activeTasks = p.tasks.filter((t: Task) => t.status !== "completed" && t.status !== "pending");
-        const pendingTasks = p.tasks.filter((t: Task) => t.status === "pending");
-        const completedTasksList = p.tasks.filter((t: Task) => t.status === "completed");
+    if (tasks.length > 0) {
+        const activeTasks = tasks.filter((t: Task) => t.status !== "completed" && t.status !== "pending");
+        const pendingTasks = tasks.filter((t: Task) => t.status === "pending");
+        const completedTasksList = tasks.filter((t: Task) => t.status === "completed");
 
         if (detailed) {
             if (activeTasks.length > 0) {
@@ -479,24 +482,25 @@ function appendCompletedTasksWithinBudget(
 
 /** Build the task-list view with height-aware section rendering. */
 function buildTaskListView(
-    plan: OrchestrationPlan,
+    planDb: PlanDatabase,
     theme: { fg: (color: SemanticColor, text: string) => string },
     width: number,
     maxContentLines: number
 ): string[] {
     const lines: string[] = [];
-    const p = plan;
 
     // --- Header (label + goal + progress bar + phase detail messages) ---
     const phaseLabel = computeExecutionPhaseLabel();
     const { label: statusLabel, color: statusColor } = resolveStatusLabelAndColor(phaseLabel);
     lines.push(theme.fg(statusColor, `Orchestrator [${statusLabel}]`));
-    if (p.goal) {
-        lines.push(truncateToWidth(`Goal: ${p.goal}`, width));
+    const goal = planDb.getGoal();
+    if (goal) {
+        lines.push(truncateToWidth(`Goal: ${goal}`, width));
     }
 
-    const totalTasks = p.tasks ? p.tasks.length : 0;
-    const completedCount = p.tasks ? p.tasks.filter((t: Task) => t.status === "completed").length : 0;
+    const tasks = planDb.getTasks();
+    const totalTasks = tasks.length;
+    const completedCount = tasks.filter((t: Task) => t.status === "completed").length;
     if (totalTasks > 0) {
         const barLen = 30;
         const filled = Math.round((completedCount / totalTasks) * barLen);
@@ -504,15 +508,15 @@ function buildTaskListView(
         lines.push(theme.fg("dim", `  [${bar}] ${completedCount}/${totalTasks} tasks`));
     }
 
-    appendPhaseDetailMessages(lines, phaseLabel, p, theme);
+    appendPhaseDetailMessages(lines, phaseLabel, planDb, theme);
 
     // --- Remaining budget for task sections ---
     let remaining = maxContentLines - lines.length;
     if (remaining < 3) return lines; // not enough space for any section
 
-    const activeTasks = p.tasks?.filter((t: Task) => t.status !== "completed" && t.status !== "pending") || [];
-    const pendingTasks = p.tasks?.filter((t: Task) => t.status === "pending") || [];
-    const completedTasksList = p.tasks?.filter((t: Task) => t.status === "completed") || [];
+    const activeTasks = tasks.filter((t: Task) => t.status !== "completed" && t.status !== "pending");
+    const pendingTasks = tasks.filter((t: Task) => t.status === "pending");
+    const completedTasksList = tasks.filter((t: Task) => t.status === "completed");
 
     // --- Active tasks (always shown, amber-highlighted) ---
     if (activeTasks.length > 0 && remaining >= 2) {
@@ -573,7 +577,7 @@ function buildTaskListView(
  */
 function buildMonitorView(
     taskInfo: ReturnType<typeof getActiveTaskInfo>,
-    plan: OrchestrationPlan,
+    planDb: PlanDatabase,
     theme: { fg: (color: any, text: string) => string },
     width: number,
     maxContentLines: number
@@ -586,7 +590,7 @@ function buildMonitorView(
     }
 
     // --- Task goal header (like task-list view) ---
-    const activeTask = plan.tasks?.find((t: Task) => t.id === taskInfo.taskId);
+    const activeTask = planDb.getTasks().find((t: Task) => t.id === taskInfo.taskId);
     if (activeTask) {
         const statusColor = resolveTaskStatusColor(activeTask.status);
         lines.push(
@@ -652,12 +656,12 @@ function buildMonitorView(
  * Auto-refreshes on plan-change and monitor-change events.
  */
 export async function showOrchestratorStatus(ctx: ExtensionContext) {
-    const plan = OrchestratorState.plan;
-    if (!plan) return;
+    const planDb = OrchestratorState.planDb;
+    if (!planDb) return;
 
     await ctx.ui.custom<void>(
         (tui, theme, _keybindings, done) => {
-            let currentPlan = plan;
+            let currentPlanDb = planDb;
             let unsubscribed = false;
             let cachedWidth = 0;
             let cachedLines: string[] | null = null;
@@ -684,7 +688,7 @@ export async function showOrchestratorStatus(ctx: ExtensionContext) {
 
                 if (viewMode === "tasks") {
                     contentLines = buildTaskListView(
-                        currentPlan,
+                        currentPlanDb,
                         ctx.ui.theme as unknown as typeof theme,
                         width,
                         maxContentLines - 2 // reserve hint + blank separator at top
@@ -693,7 +697,7 @@ export async function showOrchestratorStatus(ctx: ExtensionContext) {
                     const taskInfo = getActiveTaskInfo();
                     contentLines = buildMonitorView(
                         taskInfo,
-                        currentPlan,
+                        currentPlanDb,
                         theme,
                         width,
                         maxContentLines - 2 // reserve hint + blank separator at top
@@ -714,9 +718,9 @@ export async function showOrchestratorStatus(ctx: ExtensionContext) {
             // --- Event listeners for live updates ---
             const onPlanChanged = onPlanChange(() => {
                 if (unsubscribed) return;
-                const refreshedPlan = OrchestratorState.plan;
-                if (refreshedPlan) {
-                    currentPlan = refreshedPlan;
+                const refreshedPlanDb = OrchestratorState.planDb;
+                if (refreshedPlanDb) {
+                    currentPlanDb = refreshedPlanDb;
                     cachedLines = null;
                     tui.requestRender();
                 }
@@ -793,8 +797,8 @@ export function setupUIWidget(pi: ExtensionAPI) {
     pi.on("session_start", async (_event, ctx: ExtensionContext) => {
         widgetCtx = ctx;
         // Show widget immediately if there's an existing plan
-        const plan = OrchestratorState.plan;
-        if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
+        const planDb = OrchestratorState.planDb;
+        if (planDb && inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) !== "completed") {
             updateWidget(ctx);
         }
     });
@@ -806,8 +810,8 @@ export function setupUIWidget(pi: ExtensionAPI) {
             clearUI(ctx);
             return;
         }
-        const plan = OrchestratorState.plan;
-        if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
+        const planDb = OrchestratorState.planDb;
+        if (planDb && inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) !== "completed") {
             updateWidget(ctx);
             ctx.ui.setStatus("orchestrator", buildStatusSummary());
         }
@@ -823,9 +827,9 @@ export function setupUIWidget(pi: ExtensionAPI) {
         updateWidget(widgetCtx);
         refreshBorder();
         // Refresh footer status line
-        const plan = OrchestratorState.plan;
+        const planDb = OrchestratorState.planDb;
         if (widgetCtx) {
-            if (plan) {
+            if (planDb) {
                 widgetCtx.ui.setStatus("orchestrator", buildStatusSummary());
             } else {
                 widgetCtx.ui.setStatus("orchestrator", undefined);
@@ -858,14 +862,14 @@ function updateWidget(ctx: ExtensionContext) {
         return;
     }
 
-    const plan = OrchestratorState.plan;
-    if (!plan || inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
+    const planDb = OrchestratorState.planDb;
+    if (!planDb || inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) === "completed") {
         ctx.ui.setWidget("orchestrator-status", undefined);
         return;
     }
 
     // Use shared display builder for consistent widget/overlay rendering
-    const lines = buildPlanDisplay(plan, ctx.ui.theme, {
+    const lines = buildPlanDisplay(planDb, ctx.ui.theme, {
         compact: true,
         detailed: false
     });

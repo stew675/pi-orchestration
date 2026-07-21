@@ -14,8 +14,11 @@ import {
     switchToOrchestrationModel,
     restoreMainModel,
     enterPlanningMode,
-    exitPlanningMode
+    exitPlanningMode,
+    getPlanDb,
+    setPlanDb
 } from "../core";
+import { PlanDatabase, PlanTransaction } from "../core/plan-database";
 import { isActive as stateIsActive, isPlanningMode, isExecutingMode } from "../core/state-machine";
 import { showOrchestratorStatus, setOrchestrationEditor, clearUI, refreshBorder } from "../ui/ui";
 import { openSettingsMenu } from "../settings/settings-menu";
@@ -117,9 +120,10 @@ function handleResumeCodeReview(pi: ExtensionAPI) {
 }
 
 function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
-    const plan = OrchestratorState.plan;
-    if (!plan) return;
-    const clarifyingTask = (plan.tasks || []).find((t: Task) => t.status === "awaiting_clarification");
+    const planDb = getPlanDb();
+    if (!planDb) return;
+    const tasks = planDb.getTasks();
+    const clarifyingTask = tasks.find((t: Task) => t.status === "awaiting_clarification");
     if (clarifyingTask) {
         sendResumeMessage(
             pi,
@@ -128,7 +132,7 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
         return;
     }
 
-    const next = findNextTaskToRun(plan);
+    const next = findNextTaskToRun(planDb);
     if (!next) {
         if (OrchestratorState.codeReviewModel) {
             if (OrchestratorState.currentState !== "implementing") {
@@ -148,7 +152,7 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
             }
         }
         const reviewMessage = buildFinalReviewMessage(
-            plan,
+            getPlanDb()!.toJSON(),
             "System: All tasks completed on resume. Entering FINAL REVIEW."
         );
         sendResumeMessage(pi, reviewMessage);
@@ -163,7 +167,7 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
         return;
     }
 
-    plan.currentTaskId = next.id;
+    planDb.transaction((tx: PlanTransaction) => { tx.setCurrentTaskId(next.id); });
     sendResumeMessage(
         pi,
         `System: Resuming execution. Task '${next.id}' is the next to run. Call orchestrate_start_task("${next.id}") to begin, then yield control.`
@@ -195,8 +199,7 @@ function handleResumeFailed(pi: ExtensionAPI) {
  * safe and idempotent.
  */
 function resumePlanExecution(pi: ExtensionAPI) {
-    const plan = OrchestratorState.plan;
-    if (!plan) return;
+    if (!getPlanDb()) return;
 
     killAllProcesses("SIGKILL");
 
@@ -222,20 +225,22 @@ function resumePlanExecution(pi: ExtensionAPI) {
 }
 
 /** Find the next task that needs work, or null if all done. */
-function findNextTaskToRun(plan: OrchestrationPlan): Task | null {
-    const currentTask = plan.currentTaskId ? plan.tasks.find((t: Task) => t.id === plan.currentTaskId) : undefined;
+function findNextTaskToRun(planDb: PlanDatabase): Task | null {
+    const tasks = planDb.getTasks();
+    const currentTaskId = planDb.getCurrentTaskId();
+    const currentTask = currentTaskId ? tasks.find((t) => t.id === currentTaskId) : undefined;
     if (currentTask && currentTask.status !== "completed") {
         return currentTask;
     }
-    const completedTaskIds = new Set(plan.tasks.filter((t) => t.status === "completed").map((t) => t.id));
-    const readyTask = plan.tasks.find((t) => {
+    const completedTaskIds = new Set(tasks.filter((t) => t.status === "completed").map((t) => t.id));
+    const readyTask = tasks.find((t) => {
         if (t.status !== "pending" && t.status !== "failed") return false;
         const deps = t.dependencies || [];
         return deps.every((depId) => completedTaskIds.has(depId));
     });
     if (readyTask) return readyTask;
 
-    const nonCompleted = plan.tasks.find((t) => t.status !== "completed");
+    const nonCompleted = tasks.find((t) => t.status !== "completed");
     return nonCompleted || null;
 }
 
@@ -367,10 +372,13 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             if (!ok) return;
 
             // Check for existing incomplete plan
-            const plan = OrchestratorState.plan;
-            if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
-                await handleResumeExistingPlan(plan, pi, ctx);
-                return;
+            const plan = getPlanDb();
+            if (plan) {
+                const planObj = plan.toJSON();
+                if (inferStateFromTasks(planObj.tasks, planObj.attributes) !== "completed") {
+                    await handleResumeExistingPlan(planObj, pi, ctx);
+                    return;
+                }
             }
 
             // No incomplete plan - check for a previous implementation-plan.md on disk.
@@ -381,12 +389,12 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             // IMPORTANT: load the impl plan BEFORE clearing anything, since clearPlan() deletes it.
             const existingImplPlan = PersistenceManager.loadImplementationPlan();
             if (existingImplPlan && existingImplPlan.trim()) {
-                await handleExistingImplPlan(existingImplPlan, plan, pi, ctx);
+                await handleExistingImplPlan(existingImplPlan, plan?.toJSON() ?? null, pi, ctx);
                 return;
             }
 
             // Clean slate - no existing plans on disk
-            await handleFreshStart(plan, pi, ctx);
+            await handleFreshStart(plan?.toJSON() ?? null, pi, ctx);
         }
     });
 }
@@ -453,29 +461,49 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     const planPayload =
         implPlan && implPlan.trim() ? `\n\n--- Approved Implementation Plan ---\n${implPlan}\n--- End of Plan ---` : "";
 
-    const plan = OrchestratorState.plan;
-    if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed" && plan.tasks.length > 0) {
-        if (!plan.attributes) plan.attributes = [];
-        if (!plan.attributes.includes("PLAN_APPROVED")) plan.attributes.push("PLAN_APPROVED");
-        setOrchestrationMode("setup", pi, refreshBorder);
-        const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
-        ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
-        pi.sendMessage(
-            {
-                customType: "orchestrator_event",
-                content: `System: Execution approved - the approved implementation plan is provided below. Proceed with orchestration.${planPayload}`,
-                display: false
-            },
-            { triggerTurn: true }
-        );
+    const planDb = getPlanDb();
+    if (planDb) {
+        const plan = planDb.toJSON();
+        if (inferStateFromTasks(plan.tasks, plan.attributes) !== "completed" && plan.tasks.length > 0) {
+            planDb.transaction((tx: PlanTransaction) => { tx.setAttribute("PLAN_APPROVED"); });
+            setOrchestrationMode("setup", pi, refreshBorder);
+            const pendingTasks = plan.tasks.filter((t: Task) => t.status === "pending");
+            ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
+            pi.sendMessage(
+                {
+                    customType: "orchestrator_event",
+                    content: `System: Execution approved - the approved implementation plan is provided below. Proceed with orchestration.${planPayload}`,
+                    display: false
+                },
+                { triggerTurn: true }
+            );
+        } else {
+            const goal = extractGoalFromMarkdown(implPlan);
+            setPlanDb(new PlanDatabase({
+                goal,
+                tasks: [],
+                attributes: ["PLAN_APPROVED"]
+            }));
+            setOrchestrationMode("setup", pi, refreshBorder);
+
+            ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
+            pi.sendMessage(
+                {
+                    customType: "orchestrator_event",
+                    content: `System: Execution approved - the approved implementation plan is provided below. Build tasks from it using orchestrate_add_task, then use orchestrate_start_task to begin execution.${planPayload}`,
+                    display: false
+                },
+                { triggerTurn: true }
+            );
+        }
     } else {
+        // No planDb at all — create a fresh one
         const goal = extractGoalFromMarkdown(implPlan);
-        const newPlan = {
+        setPlanDb(new PlanDatabase({
             goal,
             tasks: [],
             attributes: ["PLAN_APPROVED"]
-        };
-        OrchestratorState.plan = newPlan;
+        }));
         setOrchestrationMode("setup", pi, refreshBorder);
 
         ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
@@ -600,11 +628,11 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             }
 
             // Check for existing plan
-            const existingPlan = OrchestratorState.plan;
+            const existingPlan = getPlanDb();
             if (existingPlan) {
                 const choice = await ctx.ui.confirm(
                     "Resume editing existing plan?",
-                    `Found existing plan: "${existingPlan.goal}".\n\nSelect Yes to continue editing, or No to discard and start fresh.`
+                    `Found existing plan: "${existingPlan.getGoal()}".\n\nSelect Yes to continue editing, or No to discard and start fresh.`
                 );
 
                 if (!choice) {
@@ -673,11 +701,12 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Resume orchestration from the last known state (after crash or pause)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            const plan = OrchestratorState.plan;
-            if (!plan) {
+            if (!getPlanDb()) {
                 ctx.ui.notify("No orchestration plan found. Describe a goal or plan with the agent.", "warning");
                 return;
             }
+
+            const plan = getPlanDb()!.toJSON();
 
             const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
             if (inferred === "completed") {
@@ -709,8 +738,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Immediately stop all running sub-agents (can be resumed later)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            const plan = OrchestratorState.plan;
-            if (!plan) {
+            if (!getPlanDb()) {
                 ctx.ui.notify("No active orchestration plan.", "warning");
                 return;
             }

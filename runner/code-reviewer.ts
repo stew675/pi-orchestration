@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef } from "../core/types";
 import { getEventToolName, isToolCallEvent } from "../core/types";
-import { OrchestratorState } from "../core";
+import { OrchestratorState, getPlanDb } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
 import { PersistenceManager } from "../context/persistence";
 import { buildCodeReviewContext } from "../context/context-builder";
@@ -24,14 +24,14 @@ export async function runCodeReview(
         return { approved: false, feedback: "Code review skipped - orchestrator is shutting down." };
     }
 
-    const plan = OrchestratorState.plan;
-    if (!plan) {
+    const planDb = getPlanDb();
+    if (!planDb) {
         return { approved: false, feedback: "No plan exists." };
     }
 
     // Find all unique created/modified files from all completed tasks
     const files = new Set<string>();
-    for (const task of plan.tasks || []) {
+    for (const task of planDb.getTasks()) {
         if (task.result?.artifacts) {
             for (const f of task.result.artifacts) {
                 files.add(f);
@@ -43,7 +43,7 @@ export async function runCodeReview(
         }
     }
 
-    const context = buildCodeReviewContext(plan, Array.from(files));
+    const context = buildCodeReviewContext(planDb.toJSON(), Array.from(files));
 
     // Save prompt context to a temporary directory
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-review-"));

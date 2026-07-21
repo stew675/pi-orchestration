@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { Runner } from "../runner";
-import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG } from "../core";
+import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG, getPlanDb } from "../core";
 import { refreshBorder } from "../ui/ui";
 import { resetLoopState } from "../process/loop-detector";
 import { buildFinalReviewMessage, notifyOrchestrator } from "../runner/utils";
@@ -28,8 +28,8 @@ export function registerReviewTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
+            const planDb = getPlanDb();
+            if (!planDb) throw new Error("No plan exists.");
 
             if (OrchestratorState.currentState === "code_review") {
                 throw new Error(
@@ -48,12 +48,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 );
             }
 
-            if (!plan.attributes) {
-                plan.attributes = [];
-            }
-            if (!plan.attributes.includes("VERIFIED")) {
-                plan.attributes.push("VERIFIED");
-            }
+            planDb.transaction((tx) => { tx.setAttribute("VERIFIED"); });
 
             // Clear all internal orchestrator state so a new goal starts fresh.
             resetLoopState();
@@ -82,8 +77,8 @@ export function registerReviewTools(pi: ExtensionAPI) {
         parameters: Type.Object({}),
         async execute() {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
+            const planDb = getPlanDb();
+            if (!planDb) throw new Error("No plan exists.");
 
             if (OrchestratorState.currentState !== "code_review") {
                 return {
@@ -97,13 +92,10 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 };
             }
 
-            if (!plan.attributes) {
-                plan.attributes = [];
-            }
-            plan.attributes = plan.attributes.filter((a) => a !== "CODE_REVIEW_REJECTED");
-            if (!plan.attributes.includes("CODE_REVIEW_APPROVED")) {
-                plan.attributes.push("CODE_REVIEW_APPROVED");
-            }
+            planDb.transaction((tx) => {
+                tx.removeAttribute("CODE_REVIEW_REJECTED");
+                tx.setAttribute("CODE_REVIEW_APPROVED");
+            });
 
             // Transition to the VERIFYING phase
             if (!transitionTo("verifying")) {
@@ -111,7 +103,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             }
 
             // Wake up the orchestrator model and enter final review
-            const reviewMessage = buildFinalReviewMessage(plan, "System: Code review complete. Entering FINAL REVIEW.");
+            const reviewMessage = buildFinalReviewMessage(planDb.toJSON(), "System: Code review complete. Entering FINAL REVIEW.");
             notifyOrchestrator(getPi(), reviewMessage, { tuiVisible: false });
 
             return {

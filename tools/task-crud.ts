@@ -1,21 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { PersistenceManager } from "../context/persistence";
 import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
-import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
+import { OrchestratorState, PlanDatabase, NOT_ACTIVE_MSG } from "../core";
 import { isActive as stateIsActive } from "../core/state-machine";
 import { isTaskReadOnly, type Task, type TaskType } from "../core/types";
-import { healDependenciesOnDelete } from "../validation/validation";
 import {
-    validatePlan,
     clampTaskTimeout,
     isBuildTask,
     requireTaskCrudPrereqs,
-    sendSilentGuidance,
-    validateAddTask,
-    validateEditTask
+    sendSilentGuidance
 } from "./shared";
 
 /** Task ID naming convention prefix. */
@@ -97,87 +92,67 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 );
             }
 
-            let plan = OrchestratorState.plan;
-
             const effectiveTimeout = clampTaskTimeout(params.timeoutMs);
+            let planDb = OrchestratorState.planDb;
 
-            // --- Pre-mutation validation (before any in-memory change) ---
-            if (plan) {
-                try {
-                    const existingTaskIds = new Set(plan.tasks.map((t: Task) => t.id));
-
-                    const existingTask = plan.tasks.find((t) => t.id === params.id);
-                    if (existingTask) {
-                        throw new Error(`Task '${params.id}' already exists.`);
-                    }
-
-                    // Validate dependencies exist, then simulate full structural checks.
-                    await validateAddTask(existingTaskIds, params.id, params.dependencies || []);
-
-                    // Build a simulated plan (existing tasks + new task) for cycle/conflict/oversized checks.
-                    const newTask: Task = {
-                        id: params.id,
-                        description: params.description,
-                        files: params.files || [],
-                        dependencies: params.dependencies || [],
-                        status: "pending" as const,
-                        attempts: 0,
-                        complexity: params.complexity as "simple" | "complex",
-                        taskType: (params.taskType as TaskType) || undefined,
-                        timeoutMs: effectiveTimeout
-                    };
-
-                    const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];
-                    simulatedTasks.push(newTask);
-
-                    if (params.replacesTaskId) {
-                        healDependenciesOnDelete(simulatedTasks, params.replacesTaskId, [params.id]);
-                        const oldIdx = simulatedTasks.findIndex(t => t.id === params.replacesTaskId);
-                        if (oldIdx !== -1) {
-                            simulatedTasks.splice(oldIdx, 1);
+            try {
+                if (planDb) {
+                    // Existing plan — add task transactionally
+                    planDb.transaction((tx) => {
+                        if (tx.hasTask(params.id)) {
+                            throw new Error(`Task '${params.id}' already exists.`);
                         }
-                    }
 
-                    const simulatedPlan = { ...plan, tasks: simulatedTasks };
-                    await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
+                        tx.addTask({
+                            id: params.id,
+                            description: params.description,
+                            files: params.files || [],
+                            dependencies: params.dependencies || [],
+                            status: "pending",
+                            attempts: 0,
+                            complexity: params.complexity as "simple" | "complex",
+                            taskType: (params.taskType as TaskType) || undefined,
+                            timeoutMs: effectiveTimeout
+                        });
 
-                    // All checks passed - safe to mutate.
-                    if (params.replacesTaskId) {
-                        healDependenciesOnDelete(plan.tasks, params.replacesTaskId, [params.id]);
-                        const oldIdx = plan.tasks.findIndex(t => t.id === params.replacesTaskId);
-                        if (oldIdx !== -1) {
-                            plan.tasks.splice(oldIdx, 1);
+                        if (params.replacesTaskId) {
+                            tx.deleteTask(params.replacesTaskId, true); // healDependencies=true
                         }
+                    });
+                } else {
+                    // First task — create PlanDatabase from scratch
+                    if (!params.goal || !params.goal.trim()) {
+                        throw new Error("goal is required for the first task. Pass the project goal string.");
                     }
-                    plan.tasks.push(newTask);
-                } catch (e) {
-                    throw new Error(
-                        `Task '${params.id}' was NOT added. The plan is unchanged.\n\nReason: ${(e as Error).message}`
-                    );
+
+                    planDb = PlanDatabase.empty();
+                    OrchestratorState.planDb = planDb;
+
+                    planDb.transaction((tx) => {
+                        tx.setGoal(params.goal.trim());
+
+                        tx.addTask({
+                            id: params.id,
+                            description: params.description,
+                            files: params.files || [],
+                            dependencies: params.dependencies || [],
+                            status: "pending",
+                            attempts: 0,
+                            complexity: params.complexity as "simple" | "complex",
+                            taskType: (params.taskType as TaskType) || undefined,
+                            timeoutMs: effectiveTimeout
+                        });
+
+                        if (params.replacesTaskId) {
+                            tx.deleteTask(params.replacesTaskId, true); // healDependencies=true
+                        }
+                    });
                 }
-            } else {
-                if (!params.goal || !params.goal.trim()) {
-                    throw new Error("goal is required for the first task. Pass the project goal string.");
-                }
-                const newTask: Task = {
-                    id: params.id,
-                    description: params.description,
-                    files: params.files || [],
-                    dependencies: params.dependencies || [],
-                    status: "pending" as const,
-                    attempts: 0,
-                    complexity: params.complexity as "simple" | "complex",
-                    taskType: (params.taskType as TaskType) || undefined,
-                    timeoutMs: effectiveTimeout
-                };
-                plan = {
-                    goal: params.goal.trim(),
-                    status: "planning" as const,
-                    tasks: [newTask]
-                };
+            } catch (e) {
+                throw new Error(
+                    `Task '${params.id}' was NOT added. The plan is unchanged.\n\nReason: ${(e as Error).message}`
+                );
             }
-
-            OrchestratorState.plan = plan;
 
             // --- Silent guidance (model sees it, user doesn't) ---
             const warnings: string[] = [];
@@ -253,25 +228,24 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
+
+            const planDb = OrchestratorState.planDb;
+            if (!planDb) throw new Error("No plan exists.");
 
             try {
-                const taskIndex = (plan.tasks || []).findIndex((t) => t.id === params.taskId);
-                if (taskIndex === -1) {
-                    throw new Error(`Task '${params.taskId}' not found.`);
-                }
+                planDb.transaction((tx) => {
+                    const task = tx.getTask(params.taskId);
+                    if (!task) {
+                        throw new Error(`Task '${params.taskId}' not found.`);
+                    }
 
-                const task = plan.tasks[taskIndex];
-                const deletableStates = ["pending", "failed", "completed"];
-                if (!deletableStates.includes(task.status)) {
-                    throw new Error(`Cannot delete task '${params.taskId}' while it is '${task.status}'.`);
-                }
+                    const deletableStates = ["pending", "failed", "completed"];
+                    if (!deletableStates.includes(task.status)) {
+                        throw new Error(`Cannot delete task '${params.taskId}' while it is '${task.status}'.`);
+                    }
 
-                // Auto-heal dependents by bypassing the deleted task cleanly
-                healDependenciesOnDelete(plan.tasks, params.taskId, []);
-
-                plan.tasks.splice(taskIndex, 1);
+                    tx.deleteTask(params.taskId, true); // healDependencies=true
+                });
             } catch (e) {
                 throw new Error(
                     `Task '${params.taskId}' was NOT deleted. The plan is unchanged.\n\nReason: ${(e as Error).message}`
@@ -307,16 +281,18 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
 
-            const task = plan.tasks.find((t) => t.id === params.taskId);
+            const planDb = OrchestratorState.planDb;
+            if (!planDb) throw new Error("No plan exists.");
+
+            const task = planDb.getTask(params.taskId);
             if (!task) {
                 throw new Error(`Task '${params.taskId}' not found.`);
             }
 
             const oldStatus = task.status;
-            // If the task is currently running, kill its specific process
+
+            // If the task is currently running, kill its specific process (I/O — outside transaction)
             if (task.status === "running" || task.status === "validating") {
                 for (const [child, info] of activeProcesses.entries()) {
                     const labelParts = info.label.split(" ");
@@ -333,14 +309,18 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             // Cancel any in-flight summary if we forcefully complete it
             Runner.cancelTaskSummary(params.taskId);
 
-            task.status = "completed";
-            task.clarificationAttempts = 0;
-            task.validatorFeedback = undefined;
-            task.result = {
-                ...(task.result || {}),
-                summary: params.summary || "Task forcibly marked as complete by orchestrator.",
-                manuallyCompleted: true
-            };
+            planDb.transaction((tx) => {
+                tx.updateTask(params.taskId, {
+                    status: "completed",
+                    clarificationAttempts: 0,
+                    validatorFeedback: undefined,
+                    result: {
+                        ...(task.result || {}),
+                        summary: params.summary || "Task forcibly marked as complete by orchestrator.",
+                        manuallyCompleted: true
+                    }
+                });
+            });
 
             return {
                 content: [{ type: "text", text: `Task '${params.taskId}' marked as completed (was: ${oldStatus}).` }],
@@ -374,49 +354,35 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
 
-            const task = plan.tasks.find((t) => t.id === params.taskId);
-            if (!task) throw new Error(`Task '${params.taskId}' not found.`);
+            const planDb = OrchestratorState.planDb;
+            if (!planDb) throw new Error("No plan exists.");
 
             try {
-                // --- Pre-mutation validation (before any in-memory change) ---
-                const existingTaskIds = new Set(plan.tasks.map((t: Task) => t.id));
-                await validateEditTask(existingTaskIds, params.dependencies);
+                planDb.transaction((tx) => {
+                    // Verify task exists (tx.getTask throws inside updateTask, but give a clearer message)
+                    if (!tx.hasTask(params.taskId)) {
+                        throw new Error(`Task '${params.taskId}' not found.`);
+                    }
 
-                // Build a simulated plan with the proposed edits for structural checks.
-                const editedTask: Task = {
-                    ...task,
-                    description: params.description ?? task.description,
-                    files: params.files ?? task.files,
-                    dependencies: params.dependencies ?? task.dependencies,
-                    complexity: params.complexity ?? task.complexity,
-                    taskType: (params.taskType as TaskType) ?? task.taskType
-                };
-                if (params.timeoutMs !== undefined) {
-                    editedTask.timeoutMs = clampTaskTimeout(params.timeoutMs);
-                }
-                const simulatedPlan: any = {
-                    ...plan,
-                    tasks: plan.tasks.map((t) => (t.id === params.taskId ? editedTask : t))
-                };
-                await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
+                    const edits: Record<string, unknown> = {};
+                    if (params.description !== undefined) edits.description = params.description;
+                    if (params.files !== undefined) edits.files = params.files;
+                    if (params.dependencies !== undefined) edits.dependencies = params.dependencies;
+                    if (params.complexity !== undefined) edits.complexity = params.complexity as "simple" | "complex";
+                    if (params.taskType !== undefined) edits.taskType = params.taskType as TaskType;
 
-                // All checks passed - safe to mutate.
-                if (params.description !== undefined) task.description = params.description;
-                if (params.files !== undefined) task.files = params.files;
-                if (params.dependencies !== undefined) task.dependencies = params.dependencies;
-                if (params.complexity !== undefined) task.complexity = params.complexity as "simple" | "complex";
-                if (params.taskType !== undefined) task.taskType = params.taskType as TaskType;
+                    // Clamp timeout: floor = configured default, ceiling = 2× default
+                    if (params.timeoutMs !== undefined) {
+                        edits.timeoutMs = clampTaskTimeout(params.timeoutMs);
+                    }
 
-                // Clamp timeout: floor = configured default, ceiling = 2× default
-                if (params.timeoutMs !== undefined) {
-                    task.timeoutMs = clampTaskTimeout(params.timeoutMs);
-                }
+                    // Edit resets task to pending with zero attempts
+                    edits.status = "pending";
+                    edits.attempts = 0;
 
-                task.status = "pending";
-                task.attempts = 0;
+                    tx.updateTask(params.taskId, edits as Parameters<typeof tx.updateTask>[1]);
+                });
             } catch (e) {
                 throw new Error(
                     `Task '${params.taskId}' was NOT edited. The plan is unchanged.\n\nReason: ${(e as Error).message}`
@@ -441,11 +407,13 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
-            const md = PersistenceManager.getMarkdownPlan();
-            if (!md) return { content: [{ type: "text", text: "No plan exists yet." }], details: {} };
+            const planDb = OrchestratorState.planDb;
+            if (!planDb || planDb.getAllTaskIds().length === 0) {
+                return { content: [{ type: "text", text: "No plan exists yet." }], details: {} };
+            }
 
             return {
-                content: [{ type: "text", text: md }],
+                content: [{ type: "text", text: planDb.toMarkdown(OrchestratorState.currentState) }],
                 details: {}
             };
         }
@@ -473,79 +441,97 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            let plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No active plan found to bulk update.");
 
-            const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];
+            const planDb = OrchestratorState.planDb;
+            if (!planDb) throw new Error("No active plan found to bulk update.");
 
-            // Track replacements to apply them transactionally
-            const replacements = new Map<string, string[]>(); // oldTaskId -> newTaskId[]
+            try {
+                planDb.transaction((tx) => {
+                    // Phase 1: Add new tasks and track replacement mappings
+                    const replacements = new Map<string, string[]>(); // oldTaskId -> [newTaskId, ...]
 
-            for (const update of params.updates) {
-                if (update.action === "add") {
-                    if (simulatedTasks.some(t => t.id === update.id)) {
-                        throw new Error(`Bulk add failed: Task '${update.id}' already exists.`);
-                    }
-                    if (!update.id.startsWith(TASK_ID_PREFIX)) {
-                        throw new Error(`Invalid task ID '${update.id}' in bulk add. Must start with '${TASK_ID_PREFIX}'.`);
-                    }
-                    simulatedTasks.push({
-                        id: update.id,
-                        description: update.description || "",
-                        files: update.files || [],
-                        dependencies: update.dependencies || [],
-                        status: "pending" as const,
-                        attempts: 0,
-                        complexity: (update.complexity as "simple" | "complex") || "complex",
-                        taskType: (update.taskType as TaskType) || "other",
-                        timeoutMs: clampTaskTimeout(update.timeoutMs)
-                    });
+                    for (const update of params.updates) {
+                        if (update.action === "add") {
+                            if (tx.hasTask(update.id)) {
+                                throw new Error(`Bulk add failed: Task '${update.id}' already exists.`);
+                            }
+                            if (!update.id.startsWith(TASK_ID_PREFIX)) {
+                                throw new Error(`Invalid task ID '${update.id}' in bulk add. Must start with '${TASK_ID_PREFIX}'.`);
+                            }
 
-                    if (update.replacesTaskId) {
-                        if (!replacements.has(update.replacesTaskId)) {
-                            replacements.set(update.replacesTaskId, []);
+                            tx.addTask({
+                                id: update.id,
+                                description: update.description || "",
+                                files: update.files || [],
+                                dependencies: update.dependencies || [],
+                                status: "pending",
+                                attempts: 0,
+                                complexity: (update.complexity as "simple" | "complex") || "complex",
+                                taskType: (update.taskType as TaskType) || "other",
+                                timeoutMs: clampTaskTimeout(update.timeoutMs)
+                            });
+
+                            if (update.replacesTaskId) {
+                                const list = replacements.get(update.replacesTaskId) || [];
+                                list.push(update.id);
+                                replacements.set(update.replacesTaskId, list);
+                            }
+                        } else if (update.action === "edit") {
+                            if (!tx.hasTask(update.id)) {
+                                throw new Error(`Bulk edit failed: Task '${update.id}' not found.`);
+                            }
+
+                            const edits: Record<string, unknown> = {};
+                            if (update.description !== undefined) edits.description = update.description;
+                            if (update.files !== undefined) edits.files = update.files;
+                            if (update.dependencies !== undefined) edits.dependencies = update.dependencies;
+                            if (update.complexity !== undefined) edits.complexity = update.complexity as "simple" | "complex";
+                            if (update.taskType !== undefined) edits.taskType = update.taskType as TaskType;
+                            if (update.timeoutMs !== undefined) edits.timeoutMs = clampTaskTimeout(update.timeoutMs);
+
+                            tx.updateTask(update.id, edits as Parameters<typeof tx.updateTask>[1]);
                         }
-                        replacements.get(update.replacesTaskId)!.push(update.id);
                     }
-                } else if (update.action === "delete") {
-                    const idx = simulatedTasks.findIndex(t => t.id === update.id);
-                    if (idx === -1) {
-                        throw new Error(`Bulk delete failed: Task '${update.id}' not found.`);
+
+                    // Phase 2: Delete tasks (after adds so replacements exist for dep healing)
+                    for (const update of params.updates) {
+                        if (update.action === "delete") {
+                            const replacementIds = replacements.get(update.id);
+                            tx.deleteTask(update.id, true); // healDependencies=true
+
+                            // If this deleted task was also a replacement target from an add action,
+                            // the deleteTask heal already propagated. But we need to handle the case
+                            // where dependents of the old task should route to new replacements.
+                            // The transaction's deleteTask with healDependencies handles:
+                            // - removing references to deleted task from other tasks' deps
+                            // - inheriting deleted task's own deps into remaining tasks
+                        }
                     }
-                    simulatedTasks.splice(idx, 1);
-                    // Standard dependency clean up
-                    for (const t of simulatedTasks) {
-                        t.dependencies = t.dependencies.filter(dep => dep !== update.id);
+
+                    // Phase 3: Apply replacement routing — re-heal dependents of replaced tasks
+                    // so they point to new replacement IDs instead of just inheriting old deps.
+                    for (const [oldId, newIds] of replacements.entries()) {
+                        const tasks = tx.getTasks();
+                        for (const task of tasks) {
+                            if (task.id === oldId) continue;
+                            const deps = task.dependencies || [];
+                            if (deps.includes(oldId)) {
+                                const newDeps = deps.filter((dId: string) => dId !== oldId);
+                                for (const replacementId of newIds) {
+                                    if (!newDeps.includes(replacementId)) {
+                                        newDeps.push(replacementId);
+                                    }
+                                }
+                                tx.updateTask(task.id, { dependencies: newDeps });
+                            }
+                        }
                     }
-                } else if (update.action === "edit") {
-                    const task = simulatedTasks.find(t => t.id === update.id);
-                    if (!task) {
-                        throw new Error(`Bulk edit failed: Task '${update.id}' not found.`);
-                    }
-                    if (update.description !== undefined) task.description = update.description;
-                    if (update.files !== undefined) task.files = update.files;
-                    if (update.dependencies !== undefined) task.dependencies = update.dependencies;
-                    if (update.complexity !== undefined) task.complexity = update.complexity as "simple" | "complex";
-                    if (update.taskType !== undefined) task.taskType = update.taskType as TaskType;
-                    if (update.timeoutMs !== undefined) task.timeoutMs = clampTaskTimeout(update.timeoutMs);
-                }
+                });
+            } catch (e) {
+                throw new Error(
+                    `Bulk update failed. The plan is unchanged.\n\nReason: ${(e as Error).message}`
+                );
             }
-
-            // Apply all replacement transfers
-            for (const [oldId, newIds] of replacements.entries()) {
-                healDependenciesOnDelete(simulatedTasks, oldId, newIds);
-                const oldIdx = simulatedTasks.findIndex(t => t.id === oldId);
-                if (oldIdx !== -1) {
-                    simulatedTasks.splice(oldIdx, 1);
-                }
-            }
-
-            // Run full validations on the simulated graph
-            const simulatedPlan = { ...plan, tasks: simulatedTasks };
-            await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
-
-            // Success: Commit the transaction
-            plan.tasks = simulatedTasks;
 
             return {
                 content: [{ type: "text", text: `Bulk update transaction completed successfully. Modified ${params.updates.length} task(s).` }],
