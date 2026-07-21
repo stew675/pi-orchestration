@@ -116,7 +116,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         });
 
                         if (params.replacesTaskId) {
-                            tx.deleteTask(params.replacesTaskId, true); // healDependencies=true
+                            tx.deleteTask(params.replacesTaskId, true, [params.id]); // healDependencies=true, replacementTaskIds=[params.id]
                         }
                     });
                 } else {
@@ -144,7 +144,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         });
 
                         if (params.replacesTaskId) {
-                            tx.deleteTask(params.replacesTaskId, true); // healDependencies=true
+                            tx.deleteTask(params.replacesTaskId, true, [params.id]); // healDependencies=true, replacementTaskIds=[params.id]
                         }
                     });
                 }
@@ -497,37 +497,22 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         }
                     }
 
-                    // Phase 2: Delete tasks (after adds so replacements exist for dep healing)
+                    // Phase 2: Process deletions for explicit delete actions and replacement targets
+                    const explicitDeletes = new Set(
+                        params.updates.filter(u => u.action === "delete").map(u => u.id)
+                    );
+
                     for (const update of params.updates) {
                         if (update.action === "delete") {
-                            const replacementIds = replacements.get(update.id);
-                            tx.deleteTask(update.id, true); // healDependencies=true
-
-                            // If this deleted task was also a replacement target from an add action,
-                            // the deleteTask heal already propagated. But we need to handle the case
-                            // where dependents of the old task should route to new replacements.
-                            // The transaction's deleteTask with healDependencies handles:
-                            // - removing references to deleted task from other tasks' deps
-                            // - inheriting deleted task's own deps into remaining tasks
+                            const replacementIds = replacements.get(update.id) || [];
+                            tx.deleteTask(update.id, true, replacementIds);
                         }
                     }
 
-                    // Phase 3: Apply replacement routing — re-heal dependents of replaced tasks
-                    // so they point to new replacement IDs instead of just inheriting old deps.
+                    // Delete any replaced tasks that were not explicitly listed as delete actions
                     for (const [oldId, newIds] of replacements.entries()) {
-                        const tasks = tx.getTasks();
-                        for (const task of tasks) {
-                            if (task.id === oldId) continue;
-                            const deps = task.dependencies || [];
-                            if (deps.includes(oldId)) {
-                                const newDeps = deps.filter((dId: string) => dId !== oldId);
-                                for (const replacementId of newIds) {
-                                    if (!newDeps.includes(replacementId)) {
-                                        newDeps.push(replacementId);
-                                    }
-                                }
-                                tx.updateTask(task.id, { dependencies: newDeps });
-                            }
+                        if (!explicitDeletes.has(oldId) && tx.hasTask(oldId)) {
+                            tx.deleteTask(oldId, true, newIds);
                         }
                     }
                 });

@@ -67,7 +67,7 @@ function simulateAddTask(
         });
 
         if (params.replacesTaskId) {
-            tx.deleteTask(params.replacesTaskId, true);
+            tx.deleteTask(params.replacesTaskId, true, [params.id]);
         }
     });
 }
@@ -234,28 +234,22 @@ function simulateBulkUpdateTasks(
             }
         }
 
-        // Phase 2: Delete tasks (after adds so replacements exist for dep healing)
+        // Phase 2: Process deletions for explicit delete actions and replacement targets
+        const explicitDeletes = new Set(
+            updates.filter((u) => u.action === "delete").map((u) => u.id)
+        );
+
         for (const update of updates) {
             if (update.action === "delete") {
-                tx.deleteTask(update.id, true);
+                const replacementIds = replacements.get(update.id) || [];
+                tx.deleteTask(update.id, true, replacementIds);
             }
         }
 
-        // Phase 3: Apply replacement routing — re-heal dependents of replaced tasks
+        // Delete any replaced tasks that were not explicitly listed as delete actions
         for (const [oldId, newIds] of replacements.entries()) {
-            const tasks = tx.getTasks();
-            for (const task of tasks) {
-                if (task.id === oldId) continue;
-                const deps = task.dependencies || [];
-                if (deps.includes(oldId)) {
-                    const newDeps = deps.filter((dId: string) => dId !== oldId);
-                    for (const replacementId of newIds) {
-                        if (!newDeps.includes(replacementId)) {
-                            newDeps.push(replacementId);
-                        }
-                    }
-                    tx.updateTask(task.id, { dependencies: newDeps });
-                }
+            if (!explicitDeletes.has(oldId) && tx.hasTask(oldId)) {
+                tx.deleteTask(oldId, true, newIds);
             }
         }
     });
@@ -694,9 +688,6 @@ describe("orchestrate_bulk_update_tasks (simulated)", () => {
 
     it("handles replacesTaskId routing in bulk update", () => {
         // Split task B into two new tasks, replacing the old one.
-        // NOTE: After delete heals dependencies (Phase 2), C's dep on B is replaced
-        // with B's own deps (A). Then Phase 3 replacement routing can't find B in C's
-        // deps anymore. So C inherits A, not the split tasks. This matches actual tool behavior.
         simulateBulkUpdateTasks(db, [
             {
                 action: "add",
@@ -722,9 +713,10 @@ describe("orchestrate_bulk_update_tasks (simulated)", () => {
         expect(db.hasTask("task_phase4_b_split1")).toBe(true);
         expect(db.hasTask("task_phase5_b_split2")).toBe(true);
 
-        // C inherited B's deps (A) via healing, not the replacement IDs
+        // C's dependency on B is replaced with the replacement IDs
         const taskC = db.getTask("task_phase3_c");
-        expect(taskC!.dependencies).toContain("task_phase1_a");
+        expect(taskC!.dependencies).toContain("task_phase4_b_split1");
+        expect(taskC!.dependencies).toContain("task_phase5_b_split2");
     });
 
     it("rejects bulk add with duplicate ID", () => {

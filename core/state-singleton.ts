@@ -160,6 +160,12 @@ export function getPlanDb(): PlanDatabase | null {
 /** Set the plan database. Use this to replace the canonical in-memory store. */
 export function setPlanDb(value: PlanDatabase | null): void {
     OrchestratorState._planDb = value;
+    try {
+        const { wirePlanPersistence } = require("../context/persistence");
+        wirePlanPersistence();
+    } catch {
+        // Ignore circular import during initial module loading or test teardown
+    }
 }
 
 /**

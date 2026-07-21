@@ -258,6 +258,17 @@ describe("dependency healing on delete", () => {
         expect(taskB!.dependencies).not.toContain("task_phase2_a");
     });
 
+    it("transfers deleted task's dependants to replacementTaskIds when provided", () => {
+        db.transaction((tx) => {
+            tx.addTask({ id: "task_phase2_a_replacement", description: "Replacement for A" });
+            tx.deleteTask("task_phase2_a", true, ["task_phase2_a_replacement"]);
+        });
+
+        const taskB = db.getTask("task_phase3_b");
+        expect(taskB).toBeDefined();
+        expect(taskB!.dependencies).toEqual(["task_phase2_a_replacement"]);
+    });
+
     it("rejects a delete without healing when dangling deps remain", () => {
         // When healDependencies=false, dependents still reference the deleted task.
         // The validation pipeline catches the dangling dependency and rolls back.

@@ -66,6 +66,10 @@ export class PlanTransaction {
     addTask(
         task: Omit<Task, "status" | "attempts"> & { status?: Task["status"]; attempts?: number }
     ): void {
+        if (this._tasks.has(task.id)) {
+            throw new Error(`Task '${task.id}' already exists`);
+        }
+
         const newTask: Task = {
             id: task.id,
             description: task.description,
@@ -115,13 +119,8 @@ export class PlanTransaction {
             throw new Error(`Task ${id} not found`);
         }
 
-        // Shallow merge: only overwrite fields explicitly provided in `partial`.
+        // Merge fields explicitly provided in `partial`.
         for (const [key, value] of Object.entries(partial)) {
-            if (value === undefined && key !== "clarificationQuery") {
-                // Skip truly omitted optional properties.
-                // Exception: clarificationQuery may be intentionally set to undefined.
-                continue;
-            }
             (existing as unknown as Record<string, unknown>)[key] = value;
         }
 
@@ -129,14 +128,14 @@ export class PlanTransaction {
     }
 
     /** Delete a task by ID. Optionally heal dependencies of remaining tasks via {@link healDependenciesOnDelete}. */
-    deleteTask(id: string, healDependencies?: boolean): void {
+    deleteTask(id: string, healDependencies?: boolean, replacementTaskIds: string[] = []): void {
         const existing = this._tasks.get(id);
         if (!existing) return; // silent no-op for missing tasks
 
         if (healDependencies) {
             // Delegate to shared healing logic (same algorithm as in validation.ts)
             const tasksArr = Array.from(this._tasks.values());
-            healDependenciesOnDelete(tasksArr, id);
+            healDependenciesOnDelete(tasksArr, id, replacementTaskIds);
             // Rebuild map from healed array and remove the deleted task
             for (const t of tasksArr) {
                 if (t.id !== id) this._tasks.set(t.id, t);
@@ -146,8 +145,7 @@ export class PlanTransaction {
             this._tasks.delete(id);
         }
 
-        const idx = this._taskOrder.indexOf(id);
-        if (idx !== -1) this._taskOrder.splice(idx, 1);
+        this._taskOrder = this._taskOrder.filter((taskId) => taskId !== id);
 
         // Also clear currentTaskId if pointing to deleted task
         if (this._currentTaskId === id) {
@@ -476,21 +474,23 @@ export class PlanDatabase {
 
     /** Reset running/validating/summarizing tasks back to pending. Returns count of recovered tasks. */
     recoverInterruptedTasks(): number {
-        let recovered = 0;
-        for (const id of this._taskOrder) {
-            const task = this._tasks.get(id);
-            if (!task) continue;
-            if (
-                task.status === "running" ||
-                task.status === "validating" ||
-                task.status === "summarizing"
-            ) {
-                task.status = "pending";
-                task.validatorFeedback = undefined;
-                recovered++;
+        return this.transaction((tx) => {
+            let recovered = 0;
+            for (const task of tx.getTasks()) {
+                if (
+                    task.status === "running" ||
+                    task.status === "validating" ||
+                    task.status === "summarizing"
+                ) {
+                    tx.updateTask(task.id, {
+                        status: "pending",
+                        validatorFeedback: undefined,
+                    });
+                    recovered++;
+                }
             }
-        }
-        return recovered;
+            return recovered;
+        });
     }
 
     /** Count tasks by status. */
