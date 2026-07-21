@@ -1,5 +1,6 @@
-import type { OrchestrationPlan, Task } from "./types";
+import type { OrchestrationPlan, OrchestrationState, Task } from "./types";
 import { ACTIVE_TASK_STATUSES } from "./types";
+import { inferStateFromTasks } from "./state-machine";
 import {
     detectCycle,
     detectFileConflicts,
@@ -24,6 +25,7 @@ function deepClone<T>(value: T): T {
 export class PlanTransaction {
     private _goal: string;
     private _currentTaskId: string | undefined;
+    private _status: OrchestrationState;
     private _tasks: Map<string, Task>;
     private _taskOrder: string[];
     private _attributes: Set<string>;
@@ -38,6 +40,7 @@ export class PlanTransaction {
     constructor(
         goal: string,
         currentTaskId: string | undefined,
+        status: OrchestrationState,
         tasks: Map<string, Task>,
         taskOrder: string[],
         attributes: Set<string>,
@@ -49,6 +52,7 @@ export class PlanTransaction {
     ) {
         this._goal = goal;
         this._currentTaskId = currentTaskId;
+        this._status = status;
         // Deep-clone each Task value so mutations in updateTask / validation
         // don't leak into the source database's internal objects.
         const clonedTasks = new Map<string, Task>();
@@ -72,6 +76,14 @@ export class PlanTransaction {
 
     setCurrentTaskId(id: string | undefined): void {
         this._currentTaskId = id;
+    }
+
+    setStatus(status: OrchestrationState): void {
+        this._status = status;
+    }
+
+    getStatus(): OrchestrationState {
+        return this._status;
     }
 
     /** Add a new task. Smart positions task in array order and re-wires dependants if replacing or preceding tasks. */
@@ -319,6 +331,7 @@ export class PlanTransaction {
         return {
             goal: this._goal,
             currentTaskId: this._currentTaskId,
+            status: this._status,
             tasks,
             attributes: Array.from(this._attributes).length > 0 ? Array.from(this._attributes) : undefined,
         };
@@ -328,6 +341,7 @@ export class PlanTransaction {
     getSnapshot(): {
         goal: string;
         currentTaskId: string | undefined;
+        status: OrchestrationState;
         tasks: Map<string, Task>;
         taskOrder: string[];
         attributes: Set<string>;
@@ -340,6 +354,7 @@ export class PlanTransaction {
         return {
             goal: this._goal,
             currentTaskId: this._currentTaskId,
+            status: this._status,
             tasks: new Map(this._tasks),
             taskOrder: [...this._taskOrder],
             attributes: new Set(this._attributes),
@@ -356,6 +371,7 @@ export class PlanTransaction {
 export class PlanDatabase {
     private _goal: string;
     private _currentTaskId: string | undefined;
+    private _status: OrchestrationState;
     private _tasks: Map<string, Task>;
     private _taskOrder: string[];
     private _attributes: Set<string>;
@@ -381,6 +397,7 @@ export class PlanDatabase {
         if (!plan) {
             this._goal = "";
             this._currentTaskId = undefined;
+            this._status = "planning";
             this._tasks = new Map();
             this._taskOrder = [];
             this._attributes = new Set();
@@ -389,6 +406,7 @@ export class PlanDatabase {
             const cloned = deepClone(plan);
             this._goal = cloned.goal;
             this._currentTaskId = cloned.currentTaskId;
+            this._status = cloned.status ?? inferStateFromTasks(cloned.tasks || [], cloned.attributes || []);
 
             this._tasks = new Map<string, Task>();
             this._taskOrder = [];
@@ -422,6 +440,16 @@ export class PlanDatabase {
 
     getCurrentTaskId(): string | undefined {
         return this._currentTaskId;
+    }
+
+    getStatus(): OrchestrationState {
+        return this._status;
+    }
+
+    setStatus(status: OrchestrationState): void {
+        this.transaction((tx) => {
+            tx.setStatus(status);
+        });
     }
 
     /** Return a fresh array copy of all tasks in order. Never returns internal references. */
@@ -464,6 +492,7 @@ export class PlanDatabase {
         return {
             goal: this._goal,
             currentTaskId: this._currentTaskId,
+            status: this._status,
             tasks,
             attributes: this._attributes.size > 0 ? [...this._attributes] : undefined,
         };
@@ -485,7 +514,7 @@ export class PlanDatabase {
         lines.push(`# Goal: ${esc(this._goal)}\n`);
         lines.push("## Status");
         lines.push(`- **Current Task**: ${this._currentTaskId || "None"}`);
-        lines.push(`- **Overall Status**: ${currentState ?? "unknown"}\n`);
+        lines.push(`- **Overall Status**: ${currentState ?? this._status}\n`);
 
         lines.push("## Tasks\n");
 
@@ -541,6 +570,7 @@ export class PlanDatabase {
         const tx = new PlanTransaction(
             snapshot.goal,
             snapshot.currentTaskId,
+            snapshot.status,
             new Map(snapshot.tasks),
             [...snapshot.taskOrder],
             new Set(snapshot.attributes),
@@ -558,6 +588,7 @@ export class PlanDatabase {
         const committed = tx.getSnapshot();
         this._goal = committed.goal;
         this._currentTaskId = committed.currentTaskId;
+        this._status = committed.status;
         this._tasks = new Map(committed.tasks);
         this._taskOrder = [...committed.taskOrder];
         this._attributes = new Set(committed.attributes);
@@ -735,6 +766,7 @@ export class PlanDatabase {
     private getSnapshot(): {
         goal: string;
         currentTaskId: string | undefined;
+        status: OrchestrationState;
         tasks: Map<string, Task>;
         taskOrder: string[];
         attributes: Set<string>;
@@ -747,6 +779,7 @@ export class PlanDatabase {
         return {
             goal: this._goal,
             currentTaskId: this._currentTaskId,
+            status: this._status,
             tasks: new Map(this._tasks),
             taskOrder: [...this._taskOrder],
             attributes: new Set(this._attributes),

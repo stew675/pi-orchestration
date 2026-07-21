@@ -25,7 +25,7 @@ import { openSettingsMenu } from "../settings/settings-menu";
 import { AcceptOrEditDialog } from "../ui/accept-or-edit-dialog";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
-import { transitionTo, inferStateFromTasks } from "../core/state-machine";
+import { transitionTo } from "../core/state-machine";
 
 /**
  * Enter orchestration mode: capture current model, optionally switch to
@@ -243,7 +243,7 @@ async function enterPlanningWithCleanContext(pi: ExtensionAPI, ctx: ExtensionCon
  * Handle the "resume existing incomplete plan" path of /om-enable toggle ON.
  */
 async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAPI, ctx: ExtensionContext) {
-    const inferredState = inferStateFromTasks(plan.tasks, plan.attributes);
+    const resumeState = plan.status ?? "planning";
     const resume = await ctx.ui.confirm(
         "Resume existing orchestration?",
         `Found incomplete plan: "${plan.goal}".\n\nSelect Yes to resume, or No to discard and start fresh.`
@@ -252,7 +252,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
     if (resume) {
         // Resume the existing plan
         await enterOrchestrationMode(pi, ctx);
-        setOrchestrationMode(inferredState, pi, refreshBorder);
+        setOrchestrationMode(resumeState, pi, refreshBorder);
         OrchestratorState.shouldResetContext = true;
 
         // Recover interrupted tasks
@@ -292,7 +292,7 @@ async function handleExistingImplPlan(
 
     if (useExisting) {
         // Keep implementation-plan.md; clear stale plan.json artifacts only
-        if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
+        if (plan && plan.status === "completed") {
             PersistenceManager.clearPlanJsonOnly();
         }
         await enterPlanningWithCleanContext(pi, ctx);
@@ -321,7 +321,7 @@ async function handleExistingImplPlan(
  * Handle the "fresh start / no existing plans" path of /om-enable toggle ON.
  */
 async function handleFreshStart(plan: OrchestrationPlan | null, pi: ExtensionAPI, ctx: ExtensionContext) {
-    if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
+    if (plan && plan.status === "completed") {
         PersistenceManager.clearPlan();
     }
     await enterPlanningWithCleanContext(pi, ctx);
@@ -352,11 +352,10 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             if (!ok) return;
 
             // Check for existing incomplete plan
-            const plan = getPlanDb();
-            if (plan) {
-                const planObj = plan.toJSON();
-                if (inferStateFromTasks(planObj.tasks, planObj.attributes) !== "completed") {
-                    await handleResumeExistingPlan(planObj, pi, ctx);
+            const planDb = getPlanDb();
+            if (planDb) {
+                if (planDb.getStatus() !== "completed") {
+                    await handleResumeExistingPlan(planDb.toJSON(), pi, ctx);
                     return;
                 }
             }
@@ -369,12 +368,12 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             // IMPORTANT: load the impl plan BEFORE clearing anything, since clearPlan() deletes it.
             const existingImplPlan = PersistenceManager.loadImplementationPlan();
             if (existingImplPlan && existingImplPlan.trim()) {
-                await handleExistingImplPlan(existingImplPlan, plan?.toJSON() ?? null, pi, ctx);
+                await handleExistingImplPlan(existingImplPlan, planDb?.toJSON() ?? null, pi, ctx);
                 return;
             }
 
             // Clean slate - no existing plans on disk
-            await handleFreshStart(plan?.toJSON() ?? null, pi, ctx);
+            await handleFreshStart(planDb?.toJSON() ?? null, pi, ctx);
         }
     });
 }
@@ -473,8 +472,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     const planDb = getPlanDb();
     if (planDb) {
         const plan = planDb.toJSON();
-        if (inferStateFromTasks(plan.tasks, plan.attributes) !== "completed" && plan.tasks.length > 0) {
-            planDb.transaction((tx: PlanTransaction) => { tx.setAttribute("PLAN_APPROVED"); });
+        if (planDb.getStatus() !== "completed" && plan.tasks.length > 0) {
             setOrchestrationMode("setup", pi, refreshBorder);
             const pendingTasks = plan.tasks.filter((t: Task) => t.status === "pending");
             ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
@@ -685,12 +683,12 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 return;
             }
 
-            const plan = getPlanDb()!.toJSON();
+            const planDb = getPlanDb()!;
+            const resumeState = planDb.getStatus();
 
-            const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
-            if (inferred === "completed") {
+            if (resumeState === "completed") {
                 ctx.ui.notify(
-                    `Plan already completed. Goal: "${plan.goal}". Use /om-reset to clear and start fresh.`,
+                    `Plan already completed. Goal: "${planDb.getGoal()}". Use /om-reset to clear and start fresh.`,
                     "info"
                 );
                 return;
@@ -700,12 +698,12 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             const recovered = recoverInterruptedTasks();
 
             await exitPlanningMode(pi, ctx);
-            setOrchestrationMode(inferred, pi, refreshBorder);
+            setOrchestrationMode(resumeState, pi, refreshBorder);
 
             ctx.ui.notify(
                 recovered > 0
-                    ? `Resuming: "${plan.goal}" (${recovered} interrupted task(s) recovered).`
-                    : `Resuming: "${plan.goal}".`,
+                    ? `Resuming: "${planDb.getGoal()}" (${recovered} interrupted task(s) recovered).`
+                    : `Resuming: "${planDb.getGoal()}".`,
                 "info"
             );
 

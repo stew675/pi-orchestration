@@ -1,41 +1,7 @@
-import { OrchestratorState, notifyTui as coreNotifyTui } from "./state-singleton";
-import type { Task } from "./types";
+import { OrchestratorState, getPlanDb, notifyTui as coreNotifyTui } from "./state-singleton";
+import type { Task, OrchestrationState } from "./types";
 
-/**
- * Well-defined orchestration states.
- *
- * - inactive: Extension not active (before /om-enable)
- * - planning: Building/editing plan
- * - plan_review: Plan under review (by reviewer model or user)
- * - plan_reviewed: Plan approved, waiting for execution start
- * - setup: Ready to create structured tasks after plan approval
- * - implementing: Actively running tasks
- * - replanning: Modifying tasks to recover from a failure
- * - pausing: Graceful pause requested, letting current task(s) finish
- * - paused: User-initiated graceful pause
- * - stopped: Immediate halt (/om-stop or orchestrate_stop)
- * - resuming: Resuming from pause/crash
- * - failed: Task failed, awaiting recovery
- * - verifying: All tasks done, awaiting orchestrate_approve_goal
- * - completed: orchestrate_approve_goal called, completely idle
- * - code_review: Automated code review in progress
- */
-export type OrchestrationState =
-  | "inactive"
-  | "planning"
-  | "plan_review"
-  | "plan_reviewed"
-  | "setup"
-  | "implementing"
-  | "replanning"
-  | "pausing"
-  | "paused"
-  | "stopped"
-  | "resuming"
-  | "failed"
-  | "verifying"
-  | "completed"
-  | "code_review";
+export type { OrchestrationState };
 
 /**
  * Valid state transitions - only these transitions are allowed.
@@ -88,6 +54,12 @@ export function transitionTo(newState: OrchestrationState, force = false): boole
 
   // Update OrchestratorState.currentState directly as the single source of truth
   OrchestratorState.currentState = newState;
+
+  // Sync to PlanDatabase if loaded
+  const planDb = getPlanDb();
+  if (planDb && planDb.getStatus() !== newState) {
+    planDb.setStatus(newState);
+  }
 
   return true;
 }

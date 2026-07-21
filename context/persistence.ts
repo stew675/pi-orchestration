@@ -3,7 +3,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import { OrchestrationPlan, TaskType, ALL_TASK_STATUSES } from "../core/types";
+import { OrchestrationPlan, OrchestrationState, TaskType, ALL_TASK_STATUSES } from "../core/types";
 import { PlanDatabase } from "../core/plan-database";
 import { OrchestratorState, notifyTui as coreNotifyTui, getPlanDb, setPlanDb, setPlanDbChangeListener } from "../core";
 
@@ -212,6 +212,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     if (typeof plan.goal !== "string") return false;
 
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
+    if (plan.status !== undefined && typeof plan.status !== "string") return false;
 
     if (!Array.isArray(plan.tasks)) return false;
     for (const item of plan.tasks) {
@@ -322,6 +323,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     const repaired: OrchestrationPlan = {
         goal: plan.goal as string,
         currentTaskId: typeof plan.currentTaskId === "string" ? (plan.currentTaskId as string) : undefined,
+        status: typeof plan.status === "string" ? (plan.status as OrchestrationState) : undefined,
         tasks: tasks as unknown as OrchestrationPlan["tasks"]
     };
 

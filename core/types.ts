@@ -42,9 +42,27 @@ export function isTaskReadOnly(taskType?: TaskType): boolean {
     return ["reviewing", "research"].includes(taskType ?? "");
 }
 
+export type OrchestrationState =
+  | "inactive"
+  | "planning"
+  | "plan_review"
+  | "plan_reviewed"
+  | "setup"
+  | "implementing"
+  | "replanning"
+  | "pausing"
+  | "paused"
+  | "stopped"
+  | "resuming"
+  | "failed"
+  | "verifying"
+  | "completed"
+  | "code_review";
+
 export interface OrchestrationPlan {
     goal: string;
     currentTaskId?: string;
+    status?: OrchestrationState;
     tasks: Task[];
     attributes?: string[];
 }

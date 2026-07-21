@@ -12,7 +12,7 @@ import {
     getPlanDb
 } from "../core";
 import type { PlanDatabase } from "../core/plan-database";
-import { getCurrentOrchestrationState, isActive as stateIsActive, type OrchestrationState, inferStateFromTasks } from "../core/state-machine";
+import { getCurrentOrchestrationState, isActive as stateIsActive, type OrchestrationState } from "../core/state-machine";
 import {
     MONITOR_POLL_INTERVAL_MS,
     getActiveTaskInfo,
@@ -799,7 +799,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
         widgetCtx = ctx;
         // Show widget immediately if there's an existing plan
         const planDb = getPlanDb();
-        if (planDb && inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) !== "completed") {
+        if (planDb && planDb.getStatus() !== "completed") {
             updateWidget(ctx);
         }
     });
@@ -812,7 +812,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
             return;
         }
         const planDb = getPlanDb();
-        if (planDb && inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) !== "completed") {
+        if (planDb && planDb.getStatus() !== "completed") {
             updateWidget(ctx);
             ctx.ui.setStatus("orchestrator", buildStatusSummary());
         }
@@ -864,7 +864,7 @@ function updateWidget(ctx: ExtensionContext) {
     }
 
     const planDb = getPlanDb();
-    if (!planDb || inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) === "completed") {
+    if (!planDb || planDb.getStatus() === "completed") {
         ctx.ui.setWidget("orchestrator-status", undefined);
         return;
     }

@@ -615,6 +615,7 @@ describe("serialization round-trip", () => {
         const plan: OrchestrationPlan = {
             goal: "Round trip test",
             currentTaskId: "task_phase3_z",
+            status: "verifying",
             tasks: [makeTask({ id: "task_phase1_x" }), makeTask({ id: "task_phase2_y" }), makeTask({ id: "task_phase3_z" })],
             attributes: ["VERIFIED", "CODE_REVIEW_APPROVED"],
         };
@@ -625,9 +626,47 @@ describe("serialization round-trip", () => {
         const restored = PlanDatabase.fromJSON(json);
         expect(restored.getGoal()).toBe("Round trip test");
         expect(restored.getCurrentTaskId()).toBe("task_phase3_z");
+        expect(restored.getStatus()).toBe("verifying");
         expect(restored.getAllTaskIds()).toEqual(["task_phase1_x", "task_phase2_y", "task_phase3_z"]);
         expect(restored.getAttributes()).toContain("VERIFIED");
         expect(restored.getAttributes()).toContain("CODE_REVIEW_APPROVED");
+    });
+
+    it("persists and round-trips orchestration status", () => {
+        const plan: OrchestrationPlan = {
+            goal: "Status test",
+            status: "implementing",
+            tasks: [makeTask({ id: "task_phase1_x" })],
+        };
+
+        const db = new PlanDatabase(plan);
+        expect(db.getStatus()).toBe("implementing");
+
+        const json = JSON.stringify(db.toJSON());
+        const restored = PlanDatabase.fromJSON(json);
+        expect(restored.getStatus()).toBe("implementing");
+        expect(restored.toJSON().status).toBe("implementing");
+    });
+
+    it("updates status via setStatus / transaction and marks DB dirty", () => {
+        const db = new PlanDatabase(makePlan([{ id: "task_phase1_x" }]));
+        db.clearDirty();
+
+        db.setStatus("verifying");
+        expect(db.getStatus()).toBe("verifying");
+        expect(db.isDirty()).toBe(true);
+        expect(db.toJSON().status).toBe("verifying");
+    });
+
+    it("falls back to inferStateFromTasks when loading legacy plan without status field", () => {
+        const legacyPlan: OrchestrationPlan = {
+            goal: "Legacy plan test",
+            tasks: [makeTask({ id: "task_phase1_x", status: "completed" })],
+            attributes: ["PLAN_APPROVED", "VERIFIED"],
+        };
+
+        const db = new PlanDatabase(legacyPlan);
+        expect(db.getStatus()).toBe("completed");
     });
 });
 

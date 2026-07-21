@@ -50,7 +50,7 @@ import {
     resetLoopBreakerFlag,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
-import { isActive, isPlanningMode, isExecutingMode, inferStateFromTasks } from "./core/state-machine";
+import { isActive, isPlanningMode, isExecutingMode } from "./core/state-machine";
 
 import {
     ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
@@ -135,17 +135,16 @@ export default function (pi: ExtensionAPI) {
         setPlanDb(parsedPlan ? new PlanDatabase(parsedPlan) : null);
         wirePlanPersistence();
 
-        const plan = getPlanDb()?.toJSON() ?? null;
-        if (plan) {
-            const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
-            if (inferred !== "completed") {
+        const planDb = getPlanDb();
+        if (planDb) {
+            if (planDb.getStatus() !== "completed") {
                 ctx.ui.notify(
-                    `Incomplete orchestration plan found: "${plan.goal}". Run /om-enable to resume or discard.`,
+                    `Incomplete orchestration plan found: "${planDb.getGoal()}". Run /om-enable to resume or discard.`,
                     "warning"
                 );
             } else {
                 ctx.ui.notify(
-                    `Previous orchestration completed. Goal: "${plan.goal}". Run /om-enable to start a new plan.`,
+                    `Previous orchestration completed. Goal: "${planDb.getGoal()}". Run /om-enable to start a new plan.`,
                     "info"
                 );
             }
