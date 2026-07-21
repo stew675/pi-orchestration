@@ -120,6 +120,29 @@ export function refreshBorder() {
     orchestrationTui?.requestRender();
 }
 
+/** Update the footer status line and widget from any context (not just hooks).
+ * Uses OrchestratorState.pi as fallback when ctx is not available. */
+export function refreshUiStatus(ctx?: ExtensionContext) {
+    const targetCtx = ctx || (OrchestratorState.pi as unknown as ExtensionContext);
+    if (!targetCtx) return;
+
+    // Guard: ExtensionAPI (OrchestratorState.pi) lacks a .ui property;
+    // only proceed with UI updates when a real ExtensionContext is available.
+    if (!targetCtx.ui) return;
+
+    // Update footer status line
+    if (stateIsActive(OrchestratorState.currentState)) {
+        const plan = OrchestratorState.plan || StateManager.loadPlan();
+        if (plan) {
+            targetCtx.ui.setStatus("orchestrator", buildStatusSummary());
+        }
+    }
+
+    // Update widget content and border color
+    updateWidget(targetCtx);
+    refreshBorder();
+}
+
 // ---------------------------------------------------------------------------
 // Shared display logic for widget and overlay (M2: deduplication)
 // ---------------------------------------------------------------------------

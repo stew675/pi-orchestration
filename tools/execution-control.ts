@@ -102,6 +102,9 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
+            // Signal that sub-agent execution has begun - loop detection can now activate.
+            signalTaskStarted();
+
             const task = plan.tasks.find((t) => t.id === params.taskId);
             if (!task) throw new Error(`Task '${params.taskId}' not found.`);
 
@@ -132,15 +135,12 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             // Set current task and start implementing
             if (getCurrentOrchestrationState() !== "implementing") {
-                if (!transitionTo("implementing", plan)) {
+                if (!transitionTo("implementing")) {
                     throw new Error("Failed to transition to implementing state");
                 }
             }
             plan.currentTaskId = task.id;
             StateManager.savePlan(plan);
-
-            // Signal that sub-agent execution has begun - loop detection can now activate.
-            signalTaskStarted();
 
             Runner.runTasks(getPi()).catch((err) => {
                 notifyTuiOnly(pi, "Runner error: " + String(err));
@@ -177,7 +177,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             // Return a concise summary - not the full markdown plan
             const lines: string[] = [];
             lines.push(`Goal: ${plan.goal}`);
-            lines.push(`Status: ${plan.status}`);
+            lines.push(`Status: ${OrchestratorState.currentState}`);
             for (const task of plan.tasks || []) {
                 lines.push(`  ${task.id} [${task.status}]: ${task.description}`);
             }
@@ -206,7 +206,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (!transitionTo("replanning", plan)) {
+            if (!transitionTo("replanning")) {
                 throw new Error("Failed to transition to replanning state");
             }
 
@@ -261,14 +261,11 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             task.clarificationQuery = undefined;
 
             // Ensure we're still in implementing state after resume
-            const refreshedPlan = StateManager.loadPlan();
-            if (refreshedPlan) {
-                const currentState = getCurrentOrchestrationState();
-                if (currentState !== "implementing" && currentState !== "paused") {
-                    transitionTo("implementing", refreshedPlan);
-                }
-                StateManager.savePlan(refreshedPlan);
+            const currentState = getCurrentOrchestrationState();
+            if (currentState !== "implementing" && currentState !== "paused") {
+                transitionTo("implementing");
             }
+            StateManager.savePlan(plan);
 
             // Re-run tasks, passing the clarification data
             Runner.runTasks(getPi(), undefined, {
@@ -304,6 +301,20 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
+            // Block during CODE_REVIEW — remediation must use tasks, not stop.
+            if (OrchestratorState.currentState === "code_review") {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "Cannot stop during CODE_REVIEW. Use orchestrate_add_task + orchestrate_start_task to issue remedial tasks, or orchestrate_complete_review if no action is needed."
+                        }
+                    ],
+                    terminate: false,
+                    details: {}
+                };
+            }
+
             // When stop is disabled by the user, return a nudge instead of halting.
             if (!OrchestratorState.allowStopTool) {
                 return {
@@ -322,7 +333,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             const plan = StateManager.loadPlan();
             if (plan) {
-                if (!transitionTo("stopped", plan)) {
+                if (!transitionTo("stopped")) {
                     notifyTuiOnly(pi, "Failed to transition to stopped state on stop");
                 }
                 StateManager.savePlan(plan);

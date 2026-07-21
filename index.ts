@@ -42,7 +42,7 @@ import {
     resetLoopBreakerFlag,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
-import { transitionTo, isActive, isPlanningMode, isExecutingMode, inferStateFromTasks } from "./core/state-machine";
+import { isActive, isPlanningMode, isExecutingMode, inferStateFromTasks } from "./core/state-machine";
 
 import {
     ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
@@ -252,20 +252,6 @@ export default function (pi: ExtensionAPI) {
         } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
             // Reviewer finished — queue back to planning model and instruct planner to process review.
             OrchestratorState._pendingReviewCompletion = true;
-        } else if (event.toolName === "orchestrate_approve_goal" && isExecutingMode(OrchestratorState.currentState)) {
-            // Final approval - transition to completed state
-            if (OrchestratorState.plan) {
-                if (!OrchestratorState.plan.attributes) {
-                    OrchestratorState.plan.attributes = [];
-                }
-                if (!OrchestratorState.plan.attributes.includes("VERIFIED")) {
-                    OrchestratorState.plan.attributes.push("VERIFIED");
-                }
-                if (!transitionTo("completed")) {
-                    notifyTuiOnly(pi, "Failed to transition to completed state after approve_goal");
-                }
-                StateManager.savePlan(OrchestratorState.plan);
-            }
         }
     });
 
@@ -361,6 +347,63 @@ export default function (pi: ExtensionAPI) {
     /** Track orchestrator tool calls per turn for loop detection.
      *  Run at turn_end to detect repetitive identical turns during execution mode. */
     pi.on("turn_end", async (_event, _ctx) => {
+        // --- Verifying phase turn limit enforcement ---
+        if (OrchestratorState.currentState === "verifying") {
+            // Reset counter on first turn after entering verifying (catches re-entry via remedial tasks)
+            if (!OrchestratorState._verifyingTurnCounterActive) {
+                OrchestratorState._verifyingTurnCounterActive = true;
+                OrchestratorState._verifyingOrchestratorTurnCount = 0;
+            }
+            OrchestratorState._verifyingOrchestratorTurnCount++;
+            const maxTurns = OrchestratorState.verifyingOrchestratorMaxTurns;
+            if (maxTurns > 0 && OrchestratorState._verifyingOrchestratorTurnCount >= maxTurns) {
+                notifyTuiOnly(
+                    pi,
+                    `[watchdog] Orchestrator exceeded verifying turn limit of ${maxTurns} (at turn ${OrchestratorState._verifyingOrchestratorTurnCount}). Force-approving.`
+                );
+
+                // Force transition to completed and notify user.
+                const plan = StateManager.loadPlan();
+                if (plan) {
+                    try {
+                        import("./core/state-machine").then(({ transitionTo }) => {
+                            transitionTo("completed");
+                            const updatedPlan = StateManager.loadPlan();
+                            if (updatedPlan) {
+                                if (!updatedPlan.attributes) updatedPlan.attributes = [];
+                                if (!updatedPlan.attributes.includes("VERIFIED")) {
+                                    updatedPlan.attributes.push("VERIFIED");
+                                }
+                                StateManager.savePlan(updatedPlan);
+                            }
+                        });
+                    } catch (e) {
+                        notifyTuiOnly(pi, "Failed during force-approve: " + String(e));
+                    }
+                }
+
+                // Wake the orchestrator with a final message so it sees the state change.
+                try {
+                    pi.sendMessage(
+                        {
+                            customType: "orchestrator_event",
+                            content: `System: Verification turn limit reached (${maxTurns} turns). The plan has been auto-approved. You may call orchestrate_approve_goal to finalize or proceed normally.`,
+                            display: true
+                        },
+                        { triggerTurn: true }
+                    );
+                } catch (e) {
+                    notifyTuiOnly(pi, "Failed to send force-approve message: " + String(e));
+                }
+            }
+        } else {
+            // Reset counter and flag when we leave verifying
+            if (OrchestratorState._verifyingTurnCounterActive) {
+                OrchestratorState._verifyingTurnCounterActive = false;
+                OrchestratorState._verifyingOrchestratorTurnCount = 0;
+            }
+        }
+
         // --- Orchestrator loop detection (execution mode only, after task assignment phase) ---
         if (
             isExecutingMode(OrchestratorState.currentState) &&
@@ -377,16 +420,32 @@ export default function (pi: ExtensionAPI) {
                     );
                     setLoopBreakerFired();
 
+                    // Pick a nudge tailored to the current phase so the model gets actionable direction.
+                    const currentState = OrchestratorState.currentState;
+                    let loopBreakerMessage: string;
+                    if (currentState === "verifying") {
+                        loopBreakerMessage =
+                            "System loop-breaker: You are in VERIFICATION mode. All implementation tasks are complete. " +
+                            "Inspect the completed work against the original goal, then call orchestrate_approve_goal when satisfied. " +
+                            "Do NOT try to start already-completed tasks — if a task needs rework, create a new remediation task with orchestrate_add_task instead.";
+                    } else {
+                        loopBreakerMessage =
+                            "System loop-breaker: You appear to be stuck in a repetitive pattern. Re-evaluate the current situation and take a different approach.";
+                    }
+
                     try {
                         pi.sendMessage(
                             {
                                 customType: "orchestrator_event",
-                                content:
-                                    "System loop-breaker: You appear to be stuck in a repetitive pattern. Re-evaluate the current situation and take a different approach.",
+                                content: loopBreakerMessage,
                                 display: true
                             },
                             { triggerTurn: true }
                         );
+                        // Reset both flag and counter so detection can fire again if the model ignores this nudge.
+                        // Gives the model ORCHESTRATOR_LOOP_THRESHOLD turns to change course before next nudge.
+                        resetLoopBreakerFlag();
+                        resetConsecutiveCount();
                     } catch (e) {
                         notifyTuiOnly(pi, "Failed to send loop-breaker message: " + String(e));
                     }

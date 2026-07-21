@@ -10,7 +10,8 @@ import {
     DEFAULT_VALIDATOR_TIMEOUT_MS,
     DEFAULT_SUMMARY_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
-    DEFAULT_SUB_AGENT_MAX_TURNS
+    DEFAULT_SUB_AGENT_MAX_TURNS,
+    DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS
 } from "../core/types";
 
 /** Keys that hold model references (nullable ModelRef). */
@@ -32,7 +33,7 @@ const NUMBER_KEYS = ["summarizationConcurrency", "parallelTasks"] as const;
 const TIMEOUT_KEYS = ["taskTimeoutMs", "validatorTimeoutMs", "taskSummaryTimeoutMs", "subAgentIdleTimeoutMs"] as const;
 
 /** Keys that hold integer limits. */
-const LIMIT_KEYS = ["subAgentMaxTurns"] as const;
+const LIMIT_KEYS = ["subAgentMaxTurns", "verifyingOrchestratorMaxTurns"] as const;
 
 /** Keys that hold boolean behaviour flags. */
 const BOOL_KEYS = ["allowStopTool", "validateSimpleTasks", "validateComplexTasks", "debugLogTransitions"] as const;
@@ -64,6 +65,7 @@ interface OrchestrationSettings {
     subAgentIdleTimeoutMs?: number;
     // Global limits
     subAgentMaxTurns?: number;
+    verifyingOrchestratorMaxTurns?: number;
     // Behaviour flags
     allowStopTool?: boolean;
     validateSimpleTasks?: boolean;
@@ -213,6 +215,8 @@ export function resetToDefaults(state: Record<SettingKey, unknown>): Orchestrati
     else state.subAgentIdleTimeoutMs = DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS;
     if (typeof effective.subAgentMaxTurns === "number") state.subAgentMaxTurns = effective.subAgentMaxTurns;
     else state.subAgentMaxTurns = DEFAULT_SUB_AGENT_MAX_TURNS;
+    if (typeof effective.verifyingOrchestratorMaxTurns === "number") state.verifyingOrchestratorMaxTurns = effective.verifyingOrchestratorMaxTurns;
+    else state.verifyingOrchestratorMaxTurns = DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS;
 
     // Behaviour flags - hard-coded defaults
     state.allowStopTool = true;
@@ -274,6 +278,7 @@ export function persistSettings(state: Record<SettingKey, unknown>): void {
 
     // Global limits - always stored explicitly
     settings.subAgentMaxTurns = state.subAgentMaxTurns as number;
+    settings.verifyingOrchestratorMaxTurns = state.verifyingOrchestratorMaxTurns as number;
 
     // Behaviour flags - only store if non-default
     const boolDefaults: Array<{ key: (typeof BOOL_KEYS)[number]; defaultValue: boolean }> = [

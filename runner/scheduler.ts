@@ -6,6 +6,7 @@ import { StateManager } from "../context/state-manager";
 import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
 import { getCurrentOrchestrationState, transitionTo } from "../core/state-machine";
+import { refreshUiStatus } from "../ui/ui";
 
 // ---------------------------------------------------------------------------
 // Scheduling lock - ensures only one scheduling decision runs at a time.
@@ -103,6 +104,7 @@ export async function runTasks(
                         notifyTuiOnly(pi, "Failed to transition to paused state due to failed tasks");
                     }
                     savePlanSafely(plan);
+                    refreshUiStatus();
                     // Include failed task's feedback so orchestrator has context for recovery
                     const failedDetails = failedTasks
                         .map((t) => {
@@ -127,6 +129,7 @@ export async function runTasks(
                         notifyTuiOnly(pi, "Failed to transition to paused state due to stalled execution");
                     }
                     savePlanSafely(plan);
+                    refreshUiStatus();
                     notifyOrchestrator(
                         pi,
                         `System: Execution stalled. Some tasks have incomplete or missing dependencies.`
@@ -197,6 +200,9 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             }
             savePlanSafely(finalPlan);
 
+            // Refresh UI immediately so the status line shows CODE_REVIEW
+            refreshUiStatus();
+
             // Delete old code-review.md if present
             StateManager.deleteCodeReview();
 
@@ -257,6 +263,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
                 savePlanSafely(updatedPlan);
+                refreshUiStatus();
                 const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             } else if (rejected) {
@@ -271,6 +278,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                     notifyTuiOnly(pi, "Failed to transition to code_review state");
                 }
                 savePlanSafely(updatedPlan);
+                refreshUiStatus();
 
                 const wakeMessage = [
                     "System: Code review complete. Changes are required before final approval.",
@@ -290,6 +298,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
                 savePlanSafely(updatedPlan);
+                refreshUiStatus();
                 const reviewMessage = buildFinalReviewMessage(updatedPlan);
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             }
@@ -298,6 +307,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 notifyTuiOnly(pi, "Failed to transition to verifying state");
             }
             savePlanSafely(finalPlan);
+            refreshUiStatus();
 
             // Build a contextual wakeup message with task summaries so the orchestrator
             // has everything it needs to decide - no need for redundant verification tasks.

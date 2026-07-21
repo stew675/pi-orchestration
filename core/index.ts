@@ -52,6 +52,7 @@ export {
     setParallelTasks,
     setTimeoutMs,
     setSubAgentMaxTurns,
+    setVerifyingOrchestratorMaxTurns,
     setBooleanSetting,
     setModelRef
 } from "./state-singleton";

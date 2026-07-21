@@ -17,6 +17,9 @@ export const DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS = 330_000;
 /** Default maximum model turns for any sub-agent. */
 export const DEFAULT_SUB_AGENT_MAX_TURNS = 30;
 
+/** Maximum orchestrator turns during the VERIFICATION phase before auto-approve (50). */
+export const DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS = 50;
+
 /** Well-known tool grant strings for sub-agent spawning. */
 export const READ_ONLY_TOOLS = "read,ls,find,grep";
 export const FULL_TOOLS = "read,write,bash,edit";

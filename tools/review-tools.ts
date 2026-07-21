@@ -32,7 +32,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (plan.status === "code_review") {
+            if (OrchestratorState.currentState === "code_review") {
                 throw new Error(
                     "orchestrate_approve_goal may not be used when in the CODE_REVIEW phase. " +
                     "To exit the CODE_REVIEW phase, you must either use orchestrate_complete_review, " +
@@ -41,12 +41,19 @@ export function registerReviewTools(pi: ExtensionAPI) {
             }
 
             // Only allow approval during the verification phase - prevents premature approval
-            if (plan.status !== REVIEW_STATUS) {
+            if (OrchestratorState.currentState !== REVIEW_STATUS) {
                 throw new Error(
-                    `Cannot approve: plan is in '${plan.status}' status. ` +
+                    `Cannot approve: plan is in '${OrchestratorState.currentState}' status. ` +
                         "orchestrate_approve_goal can only be called when the plan is in 'verifying' status " +
                         "(after all tasks have completed and the system has entered verification mode)."
                 );
+            }
+
+            if (!plan.attributes) {
+                plan.attributes = [];
+            }
+            if (!plan.attributes.includes("VERIFIED")) {
+                plan.attributes.push("VERIFIED");
             }
 
             // Clear all internal orchestrator state so a new goal starts fresh.
@@ -54,7 +61,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             Runner.cancelAllSummaries();
 
             // Transition to completed state and out of execution mode via the state machine
-            setOrchestrationMode("completed", getPi(), refreshBorder, plan);
+            setOrchestrationMode("completed", getPi(), refreshBorder);
             StateManager.savePlan(plan);
 
             return {
@@ -80,7 +87,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (plan.status !== "code_review") {
+            if (OrchestratorState.currentState !== "code_review") {
                 return {
                     content: [
                         {
@@ -92,8 +99,16 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 };
             }
 
+            if (!plan.attributes) {
+                plan.attributes = [];
+            }
+            plan.attributes = plan.attributes.filter((a) => a !== "CODE_REVIEW_REJECTED");
+            if (!plan.attributes.includes("CODE_REVIEW_APPROVED")) {
+                plan.attributes.push("CODE_REVIEW_APPROVED");
+            }
+
             // Transition to the VERIFYING phase
-            if (!transitionTo("verifying", plan)) {
+            if (!transitionTo("verifying")) {
                 throw new Error("Failed to transition to verifying state after code review");
             }
             StateManager.savePlan(plan);
