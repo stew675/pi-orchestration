@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
 import { Runner } from "../runner";
 import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG } from "../core";
 import { refreshBorder } from "../ui/ui";
@@ -62,7 +61,6 @@ export function registerReviewTools(pi: ExtensionAPI) {
 
             // Transition to completed state and out of execution mode via the state machine
             setOrchestrationMode("completed", getPi(), refreshBorder);
-            StateManager.savePlan(plan);
 
             return {
                 content: [
@@ -111,7 +109,6 @@ export function registerReviewTools(pi: ExtensionAPI) {
             if (!transitionTo("verifying")) {
                 throw new Error("Failed to transition to verifying state after code review");
             }
-            StateManager.savePlan(plan);
 
             // Wake up the orchestrator model and enter final review
             const reviewMessage = buildFinalReviewMessage(plan, "System: Code review complete. Entering FINAL REVIEW.");

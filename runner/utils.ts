@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { OrchestratorState } from "../core";
-import { StateManager } from "../context/state-manager";
 
 /** Regex patterns for extracting a short title from notification messages. */
 const TASK_NAME_RE = /Task '([^']+)'/;
@@ -80,13 +79,6 @@ function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void 
     } catch (e) {
         // Non-fatal - status entry is purely cosmetic. The sendMessage below still works.
         // Non-fatal - TUI status entry is purely cosmetic, ignoring error
-    }
-}
-
-/** Guard against writing stale state after session_shutdown has begun. */
-export function savePlanSafely(plan: OrchestrationPlan): void {
-    if (!OrchestratorState.shuttingDown) {
-        StateManager.savePlan(plan);
     }
 }
 

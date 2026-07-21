@@ -3,7 +3,7 @@ import { READ_ONLY_TOOLS } from "../core/types";
 import { StateManager } from "../context/state-manager";
 import { OrchestratorState, getPi } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
-import { savePlanSafely, notifyTuiOnly } from "./utils";
+import { notifyTuiOnly } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
 
 
@@ -77,7 +77,6 @@ export async function completeTaskWithSummary(task: Task, model?: ModelRef, sess
         planTask.status = "summarizing";
         planTask.clarificationAttempts = 0;
     }
-    savePlanSafely(p);
 
     // Capture the data we need for summarization before the plan is reloaded
     const taskId = task.id;
@@ -204,7 +203,6 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
         notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Failed to generate summary: ${result.error}`);
         t.status = "failed";
         t.validatorFeedback = `Summary generation failed: ${result.error}`;
-        savePlanSafely(p);
 
         resumeRunnerAfterSummary();
         return;
@@ -214,8 +212,6 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     const summaryText =
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
     t.result = { ...(t.result || {}), summary: summaryText };
-
-    savePlanSafely(p);
 
     // Now that it's actually completed (with summary), archive the final result.
     StateManager.archiveTaskResult(taskId, {

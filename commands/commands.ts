@@ -111,9 +111,6 @@ function handleResumeCodeReview(pi: ExtensionAPI) {
             notifyTuiOnly(pi, "Failed to transition to implementing state on code review resume");
         }
     }
-    if (OrchestratorState.plan) {
-        StateManager.savePlan(OrchestratorState.plan);
-    }
     Runner.runTasks(pi).catch((err: Error) => {
         notifyTuiOnly(pi, "Code review resume error: " + String(err));
     });
@@ -139,7 +136,6 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
                     notifyTuiOnly(pi, "Failed to transition to implementing state on resume (code review model)");
                 }
             }
-            StateManager.savePlan(plan);
             Runner.runTasks(pi);
             return;
         }
@@ -151,7 +147,6 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
                 notifyTuiOnly(pi, "Failed to transition to verifying state on resume");
             }
         }
-        StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
             plan,
             "System: All tasks completed on resume. Entering FINAL REVIEW."
@@ -169,7 +164,6 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
     }
 
     plan.currentTaskId = next.id;
-    StateManager.savePlan(plan);
     sendResumeMessage(
         pi,
         `System: Resuming execution. Task '${next.id}' is the next to run. Call orchestrate_start_task("${next.id}") to begin, then yield control.`
@@ -184,9 +178,6 @@ function handleResumePlanning(pi: ExtensionAPI) {
 }
 
 function handleResumeFailed(pi: ExtensionAPI) {
-    if (OrchestratorState.plan) {
-        StateManager.savePlan(OrchestratorState.plan);
-    }
     sendResumeMessage(
         pi,
         `System: Resuming from failed state. Use orchestrate_check_status to inspect, then orchestrate_replan to recover.`
@@ -281,9 +272,6 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
 
         // Recover interrupted tasks
         const recovered = recoverInterruptedTasks();
-        if (recovered > 0) {
-            StateManager.savePlan(plan);
-        }
 
         ctx.ui.notify(
             recovered > 0
@@ -470,7 +458,6 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
         if (!plan.attributes) plan.attributes = [];
         if (!plan.attributes.includes("PLAN_APPROVED")) plan.attributes.push("PLAN_APPROVED");
         setOrchestrationMode("setup", pi, refreshBorder);
-        StateManager.savePlan(plan);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
         ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
         pi.sendMessage(
@@ -488,8 +475,8 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             tasks: [],
             attributes: ["PLAN_APPROVED"]
         };
+        OrchestratorState.plan = newPlan;
         setOrchestrationMode("setup", pi, refreshBorder);
-        StateManager.savePlan(newPlan);
 
         ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
         pi.sendMessage(
@@ -662,9 +649,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                     ctx.ui.notify("Cannot pause execution", "error");
                     return;
                 }
-                if (OrchestratorState.plan) {
-                    StateManager.savePlan(OrchestratorState.plan);
-                }
                 ctx.ui.notify(
                     "Orchestration pausing gracefully - current task will finish, then execution stops.",
                     "warning"
@@ -706,9 +690,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
             // Recover interrupted tasks
             const recovered = recoverInterruptedTasks();
-            if (recovered > 0) {
-                StateManager.savePlan(plan);
-            }
 
             await exitPlanningMode(pi, ctx);
             setOrchestrationMode(inferred, pi, refreshBorder);
@@ -741,7 +722,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (!transitionTo("stopped")) {
                 notifyTuiOnly(pi, "Failed to transition to stopped state on /om-stop");
             }
-            StateManager.savePlan(plan);
 
             ctx.ui.notify("Orchestration stopped. Plan preserved - use /om-resume to continue.", "warning");
         }

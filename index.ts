@@ -372,7 +372,6 @@ export default function (pi: ExtensionAPI) {
                             if (!plan.attributes.includes("VERIFIED")) {
                                 plan.attributes.push("VERIFIED");
                             }
-                            StateManager.savePlan(plan);
                         });
                     } catch (e) {
                         notifyTuiOnly(pi, "Failed during force-approve: " + String(e));

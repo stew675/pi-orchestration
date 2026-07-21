@@ -139,7 +139,6 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 }
             }
             plan.currentTaskId = task.id;
-            StateManager.savePlan(plan);
 
             Runner.runTasks(getPi()).catch((err) => {
                 notifyTuiOnly(pi, "Runner error: " + String(err));
@@ -264,7 +263,6 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             if (currentState !== "implementing" && currentState !== "paused") {
                 transitionTo("implementing");
             }
-            StateManager.savePlan(plan);
 
             // Re-run tasks, passing the clarification data
             Runner.runTasks(getPi(), undefined, {
@@ -335,7 +333,6 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 if (!transitionTo("stopped")) {
                     notifyTuiOnly(pi, "Failed to transition to stopped state on stop");
                 }
-                StateManager.savePlan(plan);
             }
 
             return {

@@ -177,7 +177,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 };
             }
 
-            StateManager.savePlan(plan);
+            OrchestratorState.plan = plan;
 
             // --- Silent guidance (model sees it, user doesn't) ---
             const warnings: string[] = [];
@@ -278,8 +278,6 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 );
             }
 
-            StateManager.savePlan(plan);
-
             return {
                 content: [{ type: "text", text: `Task '${params.taskId}' deleted.` }],
                 details: {}
@@ -343,8 +341,6 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 summary: params.summary || "Task forcibly marked as complete by orchestrator.",
                 manuallyCompleted: true
             };
-
-            StateManager.savePlan(plan);
 
             return {
                 content: [{ type: "text", text: `Task '${params.taskId}' marked as completed (was: ${oldStatus}).` }],
@@ -426,8 +422,6 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     `Task '${params.taskId}' was NOT edited. The plan is unchanged.\n\nReason: ${(e as Error).message}`
                 );
             }
-
-            StateManager.savePlan(plan);
 
             return {
                 content: [{ type: "text", text: `Task '${params.taskId}' updated and reset to pending.` }],
@@ -552,7 +546,6 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
 
             // Success: Commit the transaction
             plan.tasks = simulatedTasks;
-            StateManager.savePlan(plan);
 
             return {
                 content: [{ type: "text", text: `Bulk update transaction completed successfully. Modified ${params.updates.length} task(s).` }],
