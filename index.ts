@@ -42,7 +42,7 @@ import {
     resetLoopBreakerFlag,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
-import { transitionTo, isActive, isPlanningMode, isExecutingMode, inferStateFromTasks } from "./core/state-machine";
+import { isActive, isPlanningMode, isExecutingMode, inferStateFromTasks } from "./core/state-machine";
 
 import {
     ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
@@ -252,20 +252,6 @@ export default function (pi: ExtensionAPI) {
         } else if (event.toolName === "orchestrate_review_plan" && OrchestratorState._inReviewPhase) {
             // Reviewer finished — queue back to planning model and instruct planner to process review.
             OrchestratorState._pendingReviewCompletion = true;
-        } else if (event.toolName === "orchestrate_approve_goal" && isExecutingMode(OrchestratorState.currentState)) {
-            // Final approval - transition to completed state
-            if (OrchestratorState.plan) {
-                if (!OrchestratorState.plan.attributes) {
-                    OrchestratorState.plan.attributes = [];
-                }
-                if (!OrchestratorState.plan.attributes.includes("VERIFIED")) {
-                    OrchestratorState.plan.attributes.push("VERIFIED");
-                }
-                if (!transitionTo("completed")) {
-                    notifyTuiOnly(pi, "Failed to transition to completed state after approve_goal");
-                }
-                StateManager.savePlan(OrchestratorState.plan);
-            }
         }
     });
 

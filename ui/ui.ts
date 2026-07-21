@@ -126,6 +126,10 @@ export function refreshUiStatus(ctx?: ExtensionContext) {
     const targetCtx = ctx || (OrchestratorState.pi as unknown as ExtensionContext);
     if (!targetCtx) return;
 
+    // Guard: ExtensionAPI (OrchestratorState.pi) lacks a .ui property;
+    // only proceed with UI updates when a real ExtensionContext is available.
+    if (!targetCtx.ui) return;
+
     // Update footer status line
     if (stateIsActive(OrchestratorState.currentState)) {
         const plan = OrchestratorState.plan || StateManager.loadPlan();

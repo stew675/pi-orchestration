@@ -135,7 +135,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             // Set current task and start implementing
             if (getCurrentOrchestrationState() !== "implementing") {
-                if (!transitionTo("implementing", plan)) {
+                if (!transitionTo("implementing")) {
                     throw new Error("Failed to transition to implementing state");
                 }
             }
@@ -206,7 +206,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (!transitionTo("replanning", plan)) {
+            if (!transitionTo("replanning")) {
                 throw new Error("Failed to transition to replanning state");
             }
 
@@ -261,14 +261,11 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             task.clarificationQuery = undefined;
 
             // Ensure we're still in implementing state after resume
-            const refreshedPlan = StateManager.loadPlan();
-            if (refreshedPlan) {
-                const currentState = getCurrentOrchestrationState();
-                if (currentState !== "implementing" && currentState !== "paused") {
-                    transitionTo("implementing", refreshedPlan);
-                }
-                StateManager.savePlan(refreshedPlan);
+            const currentState = getCurrentOrchestrationState();
+            if (currentState !== "implementing" && currentState !== "paused") {
+                transitionTo("implementing");
             }
+            StateManager.savePlan(plan);
 
             // Re-run tasks, passing the clarification data
             Runner.runTasks(getPi(), undefined, {
@@ -322,7 +319,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             const plan = StateManager.loadPlan();
             if (plan) {
-                if (!transitionTo("stopped", plan)) {
+                if (!transitionTo("stopped")) {
                     notifyTuiOnly(pi, "Failed to transition to stopped state on stop");
                 }
                 StateManager.savePlan(plan);

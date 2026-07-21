@@ -49,12 +49,19 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 );
             }
 
+            if (!plan.attributes) {
+                plan.attributes = [];
+            }
+            if (!plan.attributes.includes("VERIFIED")) {
+                plan.attributes.push("VERIFIED");
+            }
+
             // Clear all internal orchestrator state so a new goal starts fresh.
             resetLoopState();
             Runner.cancelAllSummaries();
 
             // Transition to completed state and out of execution mode via the state machine
-            setOrchestrationMode("completed", getPi(), refreshBorder, plan);
+            setOrchestrationMode("completed", getPi(), refreshBorder);
             StateManager.savePlan(plan);
 
             return {
@@ -92,8 +99,16 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 };
             }
 
+            if (!plan.attributes) {
+                plan.attributes = [];
+            }
+            plan.attributes = plan.attributes.filter((a) => a !== "CODE_REVIEW_REJECTED");
+            if (!plan.attributes.includes("CODE_REVIEW_APPROVED")) {
+                plan.attributes.push("CODE_REVIEW_APPROVED");
+            }
+
             // Transition to the VERIFYING phase
-            if (!transitionTo("verifying", plan)) {
+            if (!transitionTo("verifying")) {
                 throw new Error("Failed to transition to verifying state after code review");
             }
             StateManager.savePlan(plan);
