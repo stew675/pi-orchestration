@@ -1,6 +1,15 @@
 import type { ModelRef, Task } from "../core/types";
 import { READ_ONLY_TOOLS } from "../core/types";
 import type { PlanTransaction } from "../core/plan-database";
+
+/** Minimal task snapshot for summarization — avoids deep-clone of full Task. */
+interface SummaryTaskSnapshot {
+    id: string;
+    description?: string;
+    taskType?: Task["taskType"];
+    artifacts?: string[];
+    files?: string[];
+}
 import { PersistenceManager } from "../context/persistence";
 import { OrchestratorState, getPi, getPlanDb } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
@@ -67,7 +76,11 @@ function resetSummarySemaphore(): void {
  * - `summarizationConcurrency >= 1` → fire async summaries gated by the
  *   semaphore so at most N run concurrently; caller returns immediately.
  */
-export async function completeTaskWithSummary(task: Task, model?: ModelRef, sessionTranscript?: string): Promise<void> {
+export async function completeTaskWithSummary(
+    task: SummaryTaskSnapshot,
+    model?: ModelRef,
+    sessionTranscript?: string
+): Promise<void> {
     if (OrchestratorState.shuttingDown) return;
 
     const planDb = getPlanDb();
@@ -77,10 +90,10 @@ export async function completeTaskWithSummary(task: Task, model?: ModelRef, sess
         tx.updateTask(task.id, { status: "summarizing", clarificationAttempts: 0 });
     });
 
-    // Capture the data we need for summarization before the plan is reloaded
+    // Capture the data we need for summarization before any further mutations.
     const taskId = task.id;
     const taskDescription = task.description;
-    const artifactFiles = [...(task.result?.artifacts ?? task.files ?? [])];
+    const artifactFiles = [...(task.artifacts ?? task.files ?? [])];
 
     if (OrchestratorState.summarizationConcurrency >= 1) {
         // Async path - gate through the semaphore, then fire and forget
@@ -151,7 +164,7 @@ export function cancelTaskSummary(taskId: string): void {
 /** Run the summary sub-agent and resolve when done (async path). */
 async function runTaskSummaryAsync(
     taskId: string,
-    taskDescription: string,
+    taskDescription: string | undefined,
     artifactFiles: string[],
     model?: ModelRef,
     sessionTranscript?: string

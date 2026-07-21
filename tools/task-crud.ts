@@ -3,7 +3,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
-import { OrchestratorState, PlanDatabase, NOT_ACTIVE_MSG } from "../core";
+import { OrchestratorState, PlanDatabase, NOT_ACTIVE_MSG, getPlanDb, setPlanDb } from "../core";
 import { isActive as stateIsActive } from "../core/state-machine";
 import { isTaskReadOnly, type Task, type TaskType } from "../core/types";
 import {
@@ -93,7 +93,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             }
 
             const effectiveTimeout = clampTaskTimeout(params.timeoutMs);
-            let planDb = OrchestratorState.planDb;
+            let planDb = getPlanDb();
 
             try {
                 if (planDb) {
@@ -126,7 +126,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     }
 
                     planDb = PlanDatabase.empty();
-                    OrchestratorState.planDb = planDb;
+                    setPlanDb(planDb);
 
                     planDb.transaction((tx) => {
                         tx.setGoal(params.goal.trim());
@@ -229,7 +229,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) throw new Error("No plan exists.");
 
             try {
@@ -282,7 +282,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) throw new Error("No plan exists.");
 
             const task = planDb.getTask(params.taskId);
@@ -355,7 +355,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) throw new Error("No plan exists.");
 
             try {
@@ -407,7 +407,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb || planDb.getAllTaskIds().length === 0) {
                 return { content: [{ type: "text", text: "No plan exists yet." }], details: {} };
             }
@@ -442,7 +442,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) throw new Error("No active plan found to bulk update.");
 
             try {

@@ -243,6 +243,11 @@ export class PlanDatabase {
     private _isDirty: boolean = false;
     private _listeners: Array<() => void> = [];
 
+    /** Optional error reporter for listener failures. Set by the persistence layer
+     *  so that onDidChange errors are surfaced via the TUI (notifyTui) rather than
+     *  swallowed silently or logged to console. */
+    static reportError?: (msg: string) => void;
+
     // ------------------------------------------------------------------
     // Constructors / factories
     // ------------------------------------------------------------------
@@ -611,13 +616,18 @@ export class PlanDatabase {
         };
     }
 
-    /** @internal Notify all listeners of a state change. */
+    /** @internal Notify all listeners of a state change.
+     *  Listener errors are caught per-listener so one bad listener doesn't
+     *  suppress notifications for the rest. Errors are reported via the static
+     *  {@link reportError} callback if set (wired by persistence layer).
+     */
     private notifyListeners(): void {
         for (const listener of [...this._listeners]) {
             try {
                 listener();
-            } catch {
-                // Non-fatal — log would go here in production
+            } catch (err) {
+                const msg = `[plan-db] onDidChange listener threw: ${String(err)}`;
+                PlanDatabase.reportError?.(msg);
             }
         }
     }

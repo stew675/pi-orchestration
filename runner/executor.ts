@@ -174,7 +174,7 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
         return;
     }
 
-    // Work from the database snapshot to determine validation path
+    // Read task metadata from a snapshot to determine validation path.
     const t = planDb.getTask(taskId);
     if (!t) return;
 
@@ -186,11 +186,20 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
         (t.complexity === "simple" && OrchestratorState.validateSimpleTasks) ||
         (t.complexity !== "simple" && OrchestratorState.validateComplexTasks);
 
+    // Capture fields needed for summarization (avoids re-fetching after mutations).
+    const filesToValidate = t.result?.artifacts ?? (t.files || []);
+    const fullTranscript = monitor.getFullTranscript(taskId);
+    const summarySnapshot: { id: string; description?: string; artifacts?: string[] } = {
+        id: taskId,
+        description: t.description,
+        artifacts: filesToValidate
+    };
+
     if (!shouldValidate) {
         await completeTaskWithSummary(
-            planDb.getTask(taskId)!,
+            summarySnapshot,
             resolveSummaryModel(model),
-            monitor.getFullTranscript(taskId)
+            fullTranscript
         );
         return;
     }
@@ -198,8 +207,6 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
     // --- Validation phase ---
     planDb.transaction((tx: PlanTransaction) => { tx.updateTask(taskId, { status: "validating" }); });
 
-    const filesToValidate = t.result?.artifacts ?? (t.files || []);
-    const fullTranscript = monitor.getFullTranscript(taskId);
     const validatorResult = await validateTask(
         taskId,
         t.description,
@@ -219,7 +226,7 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
             });
         } else {
             await completeTaskWithSummary(
-                planDb.getTask(taskId)!,
+                summarySnapshot,
                 resolveSummaryModel(model),
                 fullTranscript
             );
@@ -245,7 +252,7 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
             });
         });
         await completeTaskWithSummary(
-            planDb.getTask(taskId)!,
+            summarySnapshot,
             resolveSummaryModel(model),
             fullTranscript
         );

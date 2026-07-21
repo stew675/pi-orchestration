@@ -120,6 +120,10 @@ export function wirePlanPersistence(): void {
     }
     const db = getPlanDb();
     if (!db) return;
+
+    // Wire PlanDatabase error reporter so listener failures are surfaced via TUI.
+    PlanDatabase.reportError = (msg: string) => coreNotifyTui(msg);
+
     planDbUnsubscribe = db.onDidChange(() => {
         try {
             PersistenceManager.flushPlan();

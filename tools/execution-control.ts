@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { PersistenceManager } from "../context/persistence";
 import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
-import { OrchestratorState, PlanDatabase, NOT_ACTIVE_MSG, getPi } from "../core";
+import { OrchestratorState, NOT_ACTIVE_MSG, getPi, getPlanDb } from "../core";
 import { isActive as stateIsActive, isExecutingMode } from "../core/state-machine";
 import { detectFileConflicts, formatFileConflictError } from "../validation/validation";
 import type { Task } from "../core/types";
@@ -31,7 +31,7 @@ export function registerExecutionControlTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
             const tasks = planDb.getTasks();
@@ -100,7 +100,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 );
             }
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) throw new Error("No plan exists.");
 
             // Signal that sub-agent execution has begun - loop detection can now activate.
@@ -171,7 +171,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         parameters: Type.Object({}),
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
             // Return a concise summary - not the full markdown plan
@@ -203,7 +203,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) throw new Error("No plan exists.");
 
             if (!transitionTo("replanning")) {
@@ -241,7 +241,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 );
             }
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (!planDb) throw new Error("No plan exists.");
 
             const task = planDb.getTask(params.taskId);
@@ -333,7 +333,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             killAllProcesses("SIGKILL");
 
-            const planDb = OrchestratorState.planDb;
+            const planDb = getPlanDb();
             if (planDb) {
                 if (!transitionTo("stopped")) {
                     notifyTuiOnly(pi, "Failed to transition to stopped state on stop");

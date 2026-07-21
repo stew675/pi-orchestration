@@ -9,8 +9,9 @@ import {
     computeExecutionPhaseLabel,
     stripTaskPrefix,
     truncateToSentence,
-    PlanDatabase
+    getPlanDb
 } from "../core";
+import type { PlanDatabase } from "../core/plan-database";
 import { getCurrentOrchestrationState, isActive as stateIsActive, type OrchestrationState, inferStateFromTasks } from "../core/state-machine";
 import {
     MONITOR_POLL_INTERVAL_MS,
@@ -64,7 +65,7 @@ type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim"
 function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     if (!stateIsActive(OrchestratorState.currentState) || !OrchestratorState.theme) return null;
 
-    const planDb = OrchestratorState.planDb;
+    const planDb = getPlanDb();
     // No plan yet - orchestration is active, so we're in the initial planning phase.
     if (!planDb) {
         return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "mdHeading");
@@ -133,7 +134,7 @@ export function refreshUiStatus(ctx?: ExtensionContext) {
 
     // Update footer status line
     if (stateIsActive(OrchestratorState.currentState)) {
-        const planDb = OrchestratorState.planDb;
+        const planDb = getPlanDb();
         if (planDb) {
             targetCtx.ui.setStatus("orchestrator", buildStatusSummary());
         }
@@ -656,7 +657,7 @@ function buildMonitorView(
  * Auto-refreshes on plan-change and monitor-change events.
  */
 export async function showOrchestratorStatus(ctx: ExtensionContext) {
-    const planDb = OrchestratorState.planDb;
+    const planDb = getPlanDb();
     if (!planDb) return;
 
     await ctx.ui.custom<void>(
@@ -718,7 +719,7 @@ export async function showOrchestratorStatus(ctx: ExtensionContext) {
             // --- Event listeners for live updates ---
             const onPlanChanged = onPlanChange(() => {
                 if (unsubscribed) return;
-                const refreshedPlanDb = OrchestratorState.planDb;
+                const refreshedPlanDb = getPlanDb();
                 if (refreshedPlanDb) {
                     currentPlanDb = refreshedPlanDb;
                     cachedLines = null;
@@ -797,7 +798,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
     pi.on("session_start", async (_event, ctx: ExtensionContext) => {
         widgetCtx = ctx;
         // Show widget immediately if there's an existing plan
-        const planDb = OrchestratorState.planDb;
+        const planDb = getPlanDb();
         if (planDb && inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) !== "completed") {
             updateWidget(ctx);
         }
@@ -810,7 +811,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
             clearUI(ctx);
             return;
         }
-        const planDb = OrchestratorState.planDb;
+        const planDb = getPlanDb();
         if (planDb && inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) !== "completed") {
             updateWidget(ctx);
             ctx.ui.setStatus("orchestrator", buildStatusSummary());
@@ -827,7 +828,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
         updateWidget(widgetCtx);
         refreshBorder();
         // Refresh footer status line
-        const planDb = OrchestratorState.planDb;
+        const planDb = getPlanDb();
         if (widgetCtx) {
             if (planDb) {
                 widgetCtx.ui.setStatus("orchestrator", buildStatusSummary());
@@ -862,7 +863,7 @@ function updateWidget(ctx: ExtensionContext) {
         return;
     }
 
-    const planDb = OrchestratorState.planDb;
+    const planDb = getPlanDb();
     if (!planDb || inferStateFromTasks(planDb.getTasks(), planDb.getAttributes()) === "completed") {
         ctx.ui.setWidget("orchestrator-status", undefined);
         return;

@@ -13,13 +13,15 @@ import { PlanDatabase } from "./plan-database";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
 import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, isPlanningMode, isExecutingMode, type OrchestrationState } from "./state-machine";
 
-/** External-facing shape. */
+/** External-facing shape of OrchestratorState.
+ * _planDb is internal (access via getPlanDb()/setPlanDb()) but must remain
+ * on the interface so the singleton's getter/setter compile correctly. */
 interface OrchestratorStateExternal {
     currentState: OrchestrationState;
     pi: ExtensionAPI | undefined;
     theme: Theme | null;
+    /** @internal Plan database — use getPlanDb()/setPlanDb() instead. */
     _planDb: PlanDatabase | null;
-    planDb: PlanDatabase | null;
     simpleTaskModel: ModelRef | null;
     complexTaskModel: ModelRef | null;
     summaryModel: ModelRef | null;
@@ -575,7 +577,7 @@ export function formatModel(m: ModelRef | null | undefined): string {
  * Returns the number of recovered tasks.
  */
 export function recoverInterruptedTasks(): number {
-    const planDb = OrchestratorState._planDb;
+    const planDb = getPlanDb();
     if (!planDb) return 0;
     return planDb.recoverInterruptedTasks();
 }
@@ -664,7 +666,7 @@ export function truncateToSentence(text: string, maxChars: number = 120): string
  * Build a human-readable status summary for display.
  */
 export function buildStatusSummary(): string {
-    const planDb = OrchestratorState.planDb;
+    const planDb = getPlanDb();
     if (!planDb) return "No active plan";
     const counts = planDb.countByStatus();
     const parts: string[] = [];
