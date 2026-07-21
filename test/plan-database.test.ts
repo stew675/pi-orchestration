@@ -77,16 +77,6 @@ describe("transaction commit", () => {
         expect(db.getCurrentTaskId()).toBe("task_phase1_test");
     });
 
-    it("commits setAttribute and the value is visible via getAttributes()", () => {
-        expect(db.getAttributes()).toEqual([]);
-
-        db.transaction((tx) => {
-            tx.setAttribute("VERIFIED");
-        });
-
-        expect(db.getAttributes()).toContain("VERIFIED");
-    });
-
     it("commits setGoal and the value is visible via getGoal()", () => {
         db.transaction((tx) => {
             tx.setGoal("Updated goal");
@@ -484,7 +474,7 @@ describe("file conflict auto-heal", () => {
         ]));
 
         db.transaction((tx) => {
-            tx.setAttribute("TEST");
+            tx.setCurrentTaskId("task_phase1_read1");
         });
 
         const read1 = db.getTask("task_phase1_read1");
@@ -589,7 +579,6 @@ describe("serialization round-trip", () => {
             { id: "task_phase2_b", files: ["src/b.ts"], dependencies: ["task_phase1_a"] },
         ]);
         plan.currentTaskId = "task_phase1_a";
-        plan.attributes = ["PLAN_APPROVED"];
 
         const db1 = new PlanDatabase(plan);
         const json1 = JSON.stringify(db1.toJSON());
@@ -611,13 +600,12 @@ describe("serialization round-trip", () => {
         expect(json2).toBe(json1);
     });
 
-    it("round-trips attributes and currentTaskId", () => {
+    it("round-trips status and currentTaskId", () => {
         const plan: OrchestrationPlan = {
             goal: "Round trip test",
             currentTaskId: "task_phase3_z",
             status: "verifying",
             tasks: [makeTask({ id: "task_phase1_x" }), makeTask({ id: "task_phase2_y" }), makeTask({ id: "task_phase3_z" })],
-            attributes: ["VERIFIED", "CODE_REVIEW_APPROVED"],
         };
 
         const db = new PlanDatabase(plan);
@@ -628,8 +616,6 @@ describe("serialization round-trip", () => {
         expect(restored.getCurrentTaskId()).toBe("task_phase3_z");
         expect(restored.getStatus()).toBe("verifying");
         expect(restored.getAllTaskIds()).toEqual(["task_phase1_x", "task_phase2_y", "task_phase3_z"]);
-        expect(restored.getAttributes()).toContain("VERIFIED");
-        expect(restored.getAttributes()).toContain("CODE_REVIEW_APPROVED");
     });
 
     it("persists and round-trips orchestration status", () => {
@@ -656,17 +642,6 @@ describe("serialization round-trip", () => {
         expect(db.getStatus()).toBe("verifying");
         expect(db.isDirty()).toBe(true);
         expect(db.toJSON().status).toBe("verifying");
-    });
-
-    it("falls back to inferStateFromTasks when loading legacy plan without status field", () => {
-        const legacyPlan: OrchestrationPlan = {
-            goal: "Legacy plan test",
-            tasks: [makeTask({ id: "task_phase1_x", status: "completed" })],
-            attributes: ["PLAN_APPROVED", "VERIFIED"],
-        };
-
-        const db = new PlanDatabase(legacyPlan);
-        expect(db.getStatus()).toBe("completed");
     });
 });
 
@@ -705,20 +680,6 @@ describe("defensive copies", () => {
         const freshTask = db.getTask("task_phase1_safe");
         expect(freshTask!.status).toBe("pending");
         expect(freshTask!.files).toEqual([]);
-    });
-
-    it("mutating the array from getAttributes() does not affect the database", () => {
-        const plan: OrchestrationPlan = {
-            goal: "Test",
-            tasks: [makeTask()],
-            attributes: ["VERIFIED"],
-        };
-        const db = new PlanDatabase(plan);
-
-        const attrs = db.getAttributes();
-        attrs.push("HACKED");
-
-        expect(db.getAttributes()).toEqual(["VERIFIED"]); // original unchanged
     });
 
     it("mutating the array from getAllTaskIds() does not affect the database", () => {
@@ -843,7 +804,7 @@ describe("onDidChange", () => {
 
         // Another transaction fires again
         db.transaction((tx) => {
-            tx.setAttribute("X");
+            tx.setGoal("Updated goal");
         });
         expect(callCount).toBe(2);
 

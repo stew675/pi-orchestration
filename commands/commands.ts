@@ -412,8 +412,8 @@ function initFreshExecution(
 ): void {
     setPlanDb(new PlanDatabase({
         goal,
-        tasks: [],
-        attributes: ["PLAN_APPROVED"]
+        status: "setup",
+        tasks: []
     }));
     setOrchestrationMode("setup", pi, refreshBorder);
 

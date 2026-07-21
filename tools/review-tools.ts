@@ -48,8 +48,6 @@ export function registerReviewTools(pi: ExtensionAPI) {
                 );
             }
 
-            planDb.transaction((tx) => { tx.setAttribute("VERIFIED"); });
-
             // Clear all internal orchestrator state so a new goal starts fresh.
             resetLoopState();
             Runner.cancelAllSummaries();
@@ -91,11 +89,6 @@ export function registerReviewTools(pi: ExtensionAPI) {
                     details: {}
                 };
             }
-
-            planDb.transaction((tx) => {
-                tx.removeAttribute("CODE_REVIEW_REJECTED");
-                tx.setAttribute("CODE_REVIEW_APPROVED");
-            });
 
             // Transition to the VERIFYING phase
             if (!transitionTo("verifying")) {

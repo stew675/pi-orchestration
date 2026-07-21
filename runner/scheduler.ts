@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef, Task } from "../core/types";
 import { OrchestratorState, getPlanDb } from "../core";
-import type { PlanDatabase, PlanTransaction } from "../core/plan-database";
+import type { PlanDatabase } from "../core/plan-database";
 import { PersistenceManager } from "../context/persistence";
 import { notifyOrchestrator, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
@@ -251,10 +251,6 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
 
             if (approved) {
                 notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
-                planDb.transaction((tx: PlanTransaction) => {
-                    tx.removeAttribute("CODE_REVIEW_REJECTED");
-                    tx.setAttribute("CODE_REVIEW_APPROVED");
-                });
                 // Code review passed — proceed to final verification
                 if (!transitionTo("verifying")) {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
@@ -265,10 +261,6 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             } else if (rejected) {
                 notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
-                planDb.transaction((tx: PlanTransaction) => {
-                    tx.removeAttribute("CODE_REVIEW_APPROVED");
-                    tx.setAttribute("CODE_REVIEW_REJECTED");
-                });
                 // Code review rejected — remain in code_review and wake orchestrator for remediation
                 if (!transitionTo("code_review")) {
                     notifyTuiOnly(pi, "Failed to transition to code_review state");

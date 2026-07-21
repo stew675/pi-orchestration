@@ -379,7 +379,6 @@ export default function (pi: ExtensionAPI) {
                     try {
                         import("./core/state-machine").then(({ transitionTo }) => {
                             transitionTo("completed");
-                            planDb.transaction((tx) => tx.setAttribute("VERIFIED"));
                         });
                     } catch (e) {
                         notifyTuiOnly(pi, "Failed during force-approve: " + String(e));

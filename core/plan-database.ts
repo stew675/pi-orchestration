@@ -1,6 +1,5 @@
 import type { OrchestrationPlan, OrchestrationState, Task } from "./types";
 import { ACTIVE_TASK_STATUSES } from "./types";
-import { inferStateFromTasks } from "./state-machine";
 import {
     detectCycle,
     detectFileConflicts,
@@ -28,7 +27,6 @@ export class PlanTransaction {
     private _status: OrchestrationState;
     private _tasks: Map<string, Task>;
     private _taskOrder: string[];
-    private _attributes: Set<string>;
     private _replacementMap: Map<string, string[]> = new Map();
     private _deletedTaskInfo: Map<
         string,
@@ -43,7 +41,6 @@ export class PlanTransaction {
         status: OrchestrationState,
         tasks: Map<string, Task>,
         taskOrder: string[],
-        attributes: Set<string>,
         replacementMap?: Map<string, string[]>,
         deletedTaskInfo?: Map<
             string,
@@ -61,7 +58,6 @@ export class PlanTransaction {
         }
         this._tasks = clonedTasks;
         this._taskOrder = [...taskOrder];
-        this._attributes = new Set(attributes);
         this._replacementMap = replacementMap ? new Map(replacementMap) : new Map();
         this._deletedTaskInfo = deletedTaskInfo ? new Map(deletedTaskInfo) : new Map();
     }
@@ -297,14 +293,6 @@ export class PlanTransaction {
         }
     }
 
-    setAttribute(attr: string): void {
-        this._attributes.add(attr);
-    }
-
-    removeAttribute(attr: string): void {
-        this._attributes.delete(attr);
-    }
-
     // ------------------------------------------------------------------
     // Read-only accessors (against working copy)
     // ------------------------------------------------------------------
@@ -333,7 +321,6 @@ export class PlanTransaction {
             currentTaskId: this._currentTaskId,
             status: this._status,
             tasks,
-            attributes: Array.from(this._attributes).length > 0 ? Array.from(this._attributes) : undefined,
         };
     }
 
@@ -344,7 +331,6 @@ export class PlanTransaction {
         status: OrchestrationState;
         tasks: Map<string, Task>;
         taskOrder: string[];
-        attributes: Set<string>;
         replacementMap: Map<string, string[]>;
         deletedTaskInfo: Map<
             string,
@@ -357,7 +343,6 @@ export class PlanTransaction {
             status: this._status,
             tasks: new Map(this._tasks),
             taskOrder: [...this._taskOrder],
-            attributes: new Set(this._attributes),
             replacementMap: new Map(this._replacementMap),
             deletedTaskInfo: new Map(this._deletedTaskInfo),
         };
@@ -374,7 +359,6 @@ export class PlanDatabase {
     private _status: OrchestrationState;
     private _tasks: Map<string, Task>;
     private _taskOrder: string[];
-    private _attributes: Set<string>;
     private _replacementMap: Map<string, string[]> = new Map();
     private _deletedTaskInfo: Map<
         string,
@@ -400,13 +384,12 @@ export class PlanDatabase {
             this._status = "planning";
             this._tasks = new Map();
             this._taskOrder = [];
-            this._attributes = new Set();
         } else {
             // Deep clone to own data — no shared references with disk JSON.
             const cloned = deepClone(plan);
             this._goal = cloned.goal;
             this._currentTaskId = cloned.currentTaskId;
-            this._status = cloned.status ?? inferStateFromTasks(cloned.tasks || [], cloned.attributes || []);
+            this._status = cloned.status ?? "planning";
 
             this._tasks = new Map<string, Task>();
             this._taskOrder = [];
@@ -414,8 +397,6 @@ export class PlanDatabase {
                 this._tasks.set(task.id, deepClone(task));
                 this._taskOrder.push(task.id);
             }
-
-            this._attributes = new Set(cloned.attributes || []);
         }
     }
 
@@ -472,11 +453,6 @@ export class PlanDatabase {
         return this._tasks.has(id);
     }
 
-    /** Return a fresh copy of the attributes array. */
-    getAttributes(): string[] {
-        return [...this._attributes];
-    }
-
     /** Return a copy of the task ID order array. */
     getAllTaskIds(): string[] {
         return [...this._taskOrder];
@@ -494,7 +470,6 @@ export class PlanDatabase {
             currentTaskId: this._currentTaskId,
             status: this._status,
             tasks,
-            attributes: this._attributes.size > 0 ? [...this._attributes] : undefined,
         };
     }
 
@@ -573,7 +548,6 @@ export class PlanDatabase {
             snapshot.status,
             new Map(snapshot.tasks),
             [...snapshot.taskOrder],
-            new Set(snapshot.attributes),
             new Map(snapshot.replacementMap),
             new Map(snapshot.deletedTaskInfo)
         );
@@ -591,7 +565,6 @@ export class PlanDatabase {
         this._status = committed.status;
         this._tasks = new Map(committed.tasks);
         this._taskOrder = [...committed.taskOrder];
-        this._attributes = new Set(committed.attributes);
         this._replacementMap = new Map(committed.replacementMap);
         this._deletedTaskInfo = new Map(committed.deletedTaskInfo);
         this._isDirty = true;
@@ -769,7 +742,6 @@ export class PlanDatabase {
         status: OrchestrationState;
         tasks: Map<string, Task>;
         taskOrder: string[];
-        attributes: Set<string>;
         replacementMap: Map<string, string[]>;
         deletedTaskInfo: Map<
             string,
@@ -782,7 +754,6 @@ export class PlanDatabase {
             status: this._status,
             tasks: new Map(this._tasks),
             taskOrder: [...this._taskOrder],
-            attributes: new Set(this._attributes),
             replacementMap: new Map(this._replacementMap),
             deletedTaskInfo: new Map(this._deletedTaskInfo),
         };
