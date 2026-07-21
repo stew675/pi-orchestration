@@ -67,8 +67,8 @@ function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void 
             const verbMatch = beforeAction.match(ACTION_VERB_RE);
             title = `${taskName} ${verbMatch ? verbMatch[1] : "event"}`;
         } else {
-            // Fall back to first 60 chars after stripping "System:" prefix.
-            title = message.substring(0, 60).replace(SYSTEM_PREFIX_RE, "").trim() || "Orchestration event";
+            // Fall back to first 110 chars after stripping "System:" prefix.
+            title = message.substring(0, 110).replace(SYSTEM_PREFIX_RE, "").trim() || "Orchestration event";
         }
 
         pi.appendEntry("orchestration-status", {
