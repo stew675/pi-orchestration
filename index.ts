@@ -377,16 +377,32 @@ export default function (pi: ExtensionAPI) {
                     );
                     setLoopBreakerFired();
 
+                    // Pick a nudge tailored to the current phase so the model gets actionable direction.
+                    const currentState = OrchestratorState.currentState;
+                    let loopBreakerMessage: string;
+                    if (currentState === "verifying") {
+                        loopBreakerMessage =
+                            "System loop-breaker: You are in VERIFICATION mode. All implementation tasks are complete. " +
+                            "Inspect the completed work against the original goal, then call orchestrate_approve_goal when satisfied. " +
+                            "Do NOT try to start already-completed tasks — if a task needs rework, create a new remediation task with orchestrate_add_task instead.";
+                    } else {
+                        loopBreakerMessage =
+                            "System loop-breaker: You appear to be stuck in a repetitive pattern. Re-evaluate the current situation and take a different approach.";
+                    }
+
                     try {
                         pi.sendMessage(
                             {
                                 customType: "orchestrator_event",
-                                content:
-                                    "System loop-breaker: You appear to be stuck in a repetitive pattern. Re-evaluate the current situation and take a different approach.",
+                                content: loopBreakerMessage,
                                 display: true
                             },
                             { triggerTurn: true }
                         );
+                        // Reset both flag and counter so detection can fire again if the model ignores this nudge.
+                        // Gives the model ORCHESTRATOR_LOOP_THRESHOLD turns to change course before next nudge.
+                        resetLoopBreakerFlag();
+                        resetConsecutiveCount();
                     } catch (e) {
                         notifyTuiOnly(pi, "Failed to send loop-breaker message: " + String(e));
                     }

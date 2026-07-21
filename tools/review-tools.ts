@@ -32,7 +32,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (plan.status === "code_review") {
+            if (OrchestratorState.currentState === "code_review") {
                 throw new Error(
                     "orchestrate_approve_goal may not be used when in the CODE_REVIEW phase. " +
                     "To exit the CODE_REVIEW phase, you must either use orchestrate_complete_review, " +
@@ -41,9 +41,9 @@ export function registerReviewTools(pi: ExtensionAPI) {
             }
 
             // Only allow approval during the verification phase - prevents premature approval
-            if (plan.status !== REVIEW_STATUS) {
+            if (OrchestratorState.currentState !== REVIEW_STATUS) {
                 throw new Error(
-                    `Cannot approve: plan is in '${plan.status}' status. ` +
+                    `Cannot approve: plan is in '${OrchestratorState.currentState}' status. ` +
                         "orchestrate_approve_goal can only be called when the plan is in 'verifying' status " +
                         "(after all tasks have completed and the system has entered verification mode)."
                 );
@@ -80,7 +80,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
-            if (plan.status !== "code_review") {
+            if (OrchestratorState.currentState !== "code_review") {
                 return {
                     content: [
                         {

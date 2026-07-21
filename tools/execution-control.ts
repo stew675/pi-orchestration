@@ -102,6 +102,9 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             const plan = StateManager.loadPlan();
             if (!plan) throw new Error("No plan exists.");
 
+            // Signal that sub-agent execution has begun - loop detection can now activate.
+            signalTaskStarted();
+
             const task = plan.tasks.find((t) => t.id === params.taskId);
             if (!task) throw new Error(`Task '${params.taskId}' not found.`);
 
@@ -139,9 +142,6 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             plan.currentTaskId = task.id;
             StateManager.savePlan(plan);
 
-            // Signal that sub-agent execution has begun - loop detection can now activate.
-            signalTaskStarted();
-
             Runner.runTasks(getPi()).catch((err) => {
                 notifyTuiOnly(pi, "Runner error: " + String(err));
                 notifyOrchestrator(
@@ -177,7 +177,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             // Return a concise summary - not the full markdown plan
             const lines: string[] = [];
             lines.push(`Goal: ${plan.goal}`);
-            lines.push(`Status: ${plan.status}`);
+            lines.push(`Status: ${OrchestratorState.currentState}`);
             for (const task of plan.tasks || []) {
                 lines.push(`  ${task.id} [${task.status}]: ${task.description}`);
             }

@@ -16,6 +16,7 @@ import { completeTaskWithSummary } from "./summarizer";
 import { processTaskResult as postProcessTaskResult } from "./post-processor";
 import { formatTimeout } from "../settings/time-utils";
 import { transitionTo, getCurrentOrchestrationState } from "../core/state-machine";
+import { refreshUiStatus } from "../ui/ui";
 
 /**
  * Execute a single task. Returns true to continue the loop, false to stop.
@@ -319,6 +320,7 @@ async function runTaskSubAgent(
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after task kill");
             }
             savePlanSafely(p);
+            refreshUiStatus();
             return;
         }
 
@@ -338,6 +340,7 @@ async function runTaskSubAgent(
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after non-zero exit");
             }
             savePlanSafely(p);
+            refreshUiStatus();
             return;
         }
 

@@ -5,6 +5,7 @@ import { StateManager } from "../context/state-manager";
 import { OrchestratorState } from "../core";
 import { notifyOrchestrator, savePlanSafely, notifyTuiOnly } from "./utils";
 import { transitionTo } from "../core/state-machine";
+import { refreshUiStatus } from "../ui/ui";
 
 // --- Contextual recovery guidance strategies ---
 const RECOVERY_STRATEGIES: Array<{
@@ -93,6 +94,7 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state in post-processor");
             }
             savePlanSafely(postPlan);
+            refreshUiStatus();
 
             const feedback = postTask.validatorFeedback || "";
             const recoveryMsg = `Use orchestrate_replan to recover.`;
@@ -112,6 +114,7 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
             if (postPlan) {
                 savePlanSafely(postPlan);
             }
+            refreshUiStatus();
             return notifyAndStop(pi, `System: Paused gracefully after task '${task.id}'.`);
         }
 
