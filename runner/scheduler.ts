@@ -46,7 +46,7 @@ export async function runTasks(
                 notifyTuiOnly(pi, "Runner: No plan found.");
                 notifyOrchestrator(
                     pi,
-                    "System: plan.json is corrupted or unreadable. Execution stopped. Run /om-reset to start fresh."
+                    "System: No orchestration plan available. Execution stopped. Run /om-reset to start fresh."
                 );
                 return;
             }
