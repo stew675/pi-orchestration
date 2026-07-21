@@ -1,6 +1,15 @@
 import type { ModelRef, Task } from "../core/types";
 import { READ_ONLY_TOOLS } from "../core/types";
 import type { PlanTransaction } from "../core/plan-database";
+import { PersistenceManager } from "../context/persistence";
+import { OrchestratorState, getPi, getPlanDb } from "../core";
+import { runReadOnlyAgent } from "./subagent-spawner";
+import { notifyTuiOnly } from "./utils";
+import { formatTimeout } from "../settings/time-utils";
+
+// ---------------------------------------------------------------------------
+// Type declarations
+// ---------------------------------------------------------------------------
 
 /** Minimal task snapshot for summarization — avoids deep-clone of full Task. */
 interface SummaryTaskSnapshot {
@@ -10,11 +19,6 @@ interface SummaryTaskSnapshot {
     artifacts?: string[];
     files?: string[];
 }
-import { PersistenceManager } from "../context/persistence";
-import { OrchestratorState, getPi, getPlanDb } from "../core";
-import { runReadOnlyAgent } from "./subagent-spawner";
-import { notifyTuiOnly } from "./utils";
-import { formatTimeout } from "../settings/time-utils";
 
 
 // ---------------------------------------------------------------------------

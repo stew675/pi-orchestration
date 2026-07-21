@@ -53,9 +53,14 @@ export async function executeTask(
         // Verify task exists in the database
         if (!planDb.hasTask(task.id)) return false;
 
-        // Mark task as running and set current task id via transaction
+        // Mark task as running, set current task id, and increment attempt counter via transaction
         planDb.transaction((tx: PlanTransaction) => {
-            tx.updateTask(task.id, { status: "running", startedAt: Date.now() });
+            const t = tx.getTask(task.id);
+            tx.updateTask(task.id, {
+                status: "running",
+                startedAt: Date.now(),
+                attempts: (t?.attempts ?? 0) + 1
+            });
             tx.setCurrentTaskId(task.id);
         });
 
@@ -186,16 +191,17 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
         (t.complexity === "simple" && OrchestratorState.validateSimpleTasks) ||
         (t.complexity !== "simple" && OrchestratorState.validateComplexTasks);
 
-    // Capture fields needed for summarization (avoids re-fetching after mutations).
+    // Capture fields needed for summarization.
     const filesToValidate = t.result?.artifacts ?? (t.files || []);
     const fullTranscript = monitor.getFullTranscript(taskId);
-    const summarySnapshot: { id: string; description?: string; artifacts?: string[] } = {
-        id: taskId,
-        description: t.description,
-        artifacts: filesToValidate
-    };
 
     if (!shouldValidate) {
+        // No validation — capture snapshot now and proceed to summary.
+        const summarySnapshot: { id: string; description?: string; artifacts?: string[] } = {
+            id: taskId,
+            description: t.description,
+            artifacts: filesToValidate
+        };
         await completeTaskWithSummary(
             summarySnapshot,
             resolveSummaryModel(model),
@@ -225,6 +231,13 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
                 });
             });
         } else {
+            // Capture snapshot after validation pass so any validator-side metadata is current.
+            const postValidationTask = planDb.getTask(taskId);
+            const summarySnapshot: { id: string; description?: string; artifacts?: string[] } = {
+                id: taskId,
+                description: postValidationTask?.description ?? t.description,
+                artifacts: postValidationTask?.result?.artifacts ?? filesToValidate
+            };
             await completeTaskWithSummary(
                 summarySnapshot,
                 resolveSummaryModel(model),
@@ -251,6 +264,13 @@ async function handleSuccessfulExit(taskId: string, procResult: SubAgentResult, 
                 validatorFeedback: `Validator noted: ${feedback} (auto-completed; sub-agent exited cleanly)`
             });
         });
+        // Capture snapshot after validation so any metadata updates are included.
+        const postValidationTask = planDb.getTask(taskId);
+        const summarySnapshot: { id: string; description?: string; artifacts?: string[] } = {
+            id: taskId,
+            description: postValidationTask?.description ?? t.description,
+            artifacts: postValidationTask?.result?.artifacts ?? filesToValidate
+        };
         await completeTaskWithSummary(
             summarySnapshot,
             resolveSummaryModel(model),

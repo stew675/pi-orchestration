@@ -125,11 +125,8 @@ export function wirePlanPersistence(): void {
     PlanDatabase.reportError = (msg: string) => coreNotifyTui(msg);
 
     planDbUnsubscribe = db.onDidChange(() => {
-        try {
-            PersistenceManager.flushPlan();
-        } catch (e) {
-            coreNotifyTui("PersistenceManager onDidChange flush error: " + String(e));
-        }
+        // Only fire change notifications (UI updates) — no disk I/O here.
+        // All persistence flows through the debounced timer in startPlanSaveTimer().
     });
 }
 

@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { PersistenceManager } from "../context/persistence";
 import { PLANNING_HINT_EDIT } from "../context/prompts";
 import { killAllProcesses } from "../process/process-manager";
-import { buildFinalReviewMessage, notifyTuiOnly } from "../runner/utils";
+import { buildFinalReviewMessage, notifyTuiOnly, findNextTaskToRun } from "../runner/utils";
 import { Runner } from "../runner";
 import {
     OrchestratorState,
@@ -224,26 +224,6 @@ function resumePlanExecution(pi: ExtensionAPI) {
     }
 }
 
-/** Find the next task that needs work, or null if all done. */
-function findNextTaskToRun(planDb: PlanDatabase): Task | null {
-    const tasks = planDb.getTasks();
-    const currentTaskId = planDb.getCurrentTaskId();
-    const currentTask = currentTaskId ? tasks.find((t) => t.id === currentTaskId) : undefined;
-    if (currentTask && currentTask.status !== "completed") {
-        return currentTask;
-    }
-    const completedTaskIds = new Set(tasks.filter((t) => t.status === "completed").map((t) => t.id));
-    const readyTask = tasks.find((t) => {
-        if (t.status !== "pending" && t.status !== "failed") return false;
-        const deps = t.dependencies || [];
-        return deps.every((depId) => completedTaskIds.has(depId));
-    });
-    if (readyTask) return readyTask;
-
-    const nonCompleted = tasks.find((t) => t.status !== "completed");
-    return nonCompleted || null;
-}
-
 // --- /om-enable toggle-ON helper functions ---
 
 /**
@@ -421,6 +401,35 @@ function extractGoalFromMarkdown(content: string): string {
 }
 
 /**
+ * Shared bootstrap for entering execution mode with a fresh PlanDatabase.
+ * Creates an empty database, sets orchestration state to setup, and sends
+ * a wake-up message to the orchestrator with the implementation plan payload.
+ */
+function initFreshExecution(
+    goal: string,
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    planPayload: string
+): void {
+    setPlanDb(new PlanDatabase({
+        goal,
+        tasks: [],
+        attributes: ["PLAN_APPROVED"]
+    }));
+    setOrchestrationMode("setup", pi, refreshBorder);
+
+    ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
+    pi.sendMessage(
+        {
+            customType: "orchestrator_event",
+            content: `System: Execution approved - the approved implementation plan is provided below. Build tasks from it using orchestrate_add_task, then use orchestrate_start_task to begin execution.${planPayload}`,
+            display: false
+        },
+        { triggerTurn: true }
+    );
+}
+
+/**
  * Start orchestration execution from the approved plan.
  * Shared by /om-accept command and the Accept/Edit dialog overlay.
  */
@@ -479,42 +488,12 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             );
         } else {
             const goal = extractGoalFromMarkdown(implPlan);
-            setPlanDb(new PlanDatabase({
-                goal,
-                tasks: [],
-                attributes: ["PLAN_APPROVED"]
-            }));
-            setOrchestrationMode("setup", pi, refreshBorder);
-
-            ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
-            pi.sendMessage(
-                {
-                    customType: "orchestrator_event",
-                    content: `System: Execution approved - the approved implementation plan is provided below. Build tasks from it using orchestrate_add_task, then use orchestrate_start_task to begin execution.${planPayload}`,
-                    display: false
-                },
-                { triggerTurn: true }
-            );
+            initFreshExecution(goal, pi, ctx, planPayload);
         }
     } else {
         // No planDb at all — create a fresh one
         const goal = extractGoalFromMarkdown(implPlan);
-        setPlanDb(new PlanDatabase({
-            goal,
-            tasks: [],
-            attributes: ["PLAN_APPROVED"]
-        }));
-        setOrchestrationMode("setup", pi, refreshBorder);
-
-        ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
-        pi.sendMessage(
-            {
-                customType: "orchestrator_event",
-                content: `System: Execution approved - the approved implementation plan is provided below. Build tasks from it using orchestrate_add_task, then use orchestrate_start_task to begin execution.${planPayload}`,
-                display: false
-            },
-            { triggerTurn: true }
-        );
+        initFreshExecution(goal, pi, ctx, planPayload);
     }
 }
 

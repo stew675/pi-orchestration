@@ -5,6 +5,7 @@ import {
     detectFileConflicts,
     detectOversizedTasks,
     autoHealFileConflicts,
+    healDependenciesOnDelete,
 } from "../validation/validation";
 
 // ---------------------------------------------------------------------------
@@ -28,7 +29,6 @@ export class PlanTransaction {
     private _attributes: Set<string>;
 
     // Visible to PlanDatabase.commit() only (same module)
-    declare readonly __snapshot?: never;
 
     constructor(
         goal: string,
@@ -128,37 +128,19 @@ export class PlanTransaction {
         this._tasks.set(id, existing);
     }
 
-    /** Delete a task by ID. Optionally heal dependencies of remaining tasks. */
+    /** Delete a task by ID. Optionally heal dependencies of remaining tasks via {@link healDependenciesOnDelete}. */
     deleteTask(id: string, healDependencies?: boolean): void {
         const existing = this._tasks.get(id);
         if (!existing) return; // silent no-op for missing tasks
 
         if (healDependencies) {
-            // Inline dependency healing on working-copy task array
+            // Delegate to shared healing logic (same algorithm as in validation.ts)
             const tasksArr = Array.from(this._tasks.values());
-            const deletedTaskDeps = existing.dependencies || [];
-
-            for (const task of tasksArr) {
-                if (task.id === id) continue;
-                const deps = task.dependencies || [];
-                if (deps.includes(id)) {
-                    // Remove reference to deleted task
-                    const newDeps = deps.filter((dId) => dId !== id);
-                    // Inherit deleted task's dependencies or transfer replacements
-                    for (const depId of deletedTaskDeps) {
-                        if (!newDeps.includes(depId)) {
-                            newDeps.push(depId);
-                        }
-                    }
-                    task.dependencies = newDeps;
-                }
-            }
-
-            // Rebuild map from healed array (preserves updated deps)
+            healDependenciesOnDelete(tasksArr, id);
+            // Rebuild map from healed array and remove the deleted task
             for (const t of tasksArr) {
                 if (t.id !== id) this._tasks.set(t.id, t);
             }
-            // Explicitly remove the deleted task — .set() above doesn't delete existing entries
             this._tasks.delete(id);
         } else {
             this._tasks.delete(id);
@@ -201,8 +183,8 @@ export class PlanTransaction {
     // Internal snapshot for commit (module-private)
     // ------------------------------------------------------------------
 
-    /** @internal Build the serializable plan shape from working copy. */
-    buildSnapshot(): OrchestrationPlan {
+    /** @internal Build the serializable plan shape from working copy. Accessible to PlanDatabase.commit() via same-module friendship but not intended for external callers. */
+    public buildSnapshot(): OrchestrationPlan {
         const tasks = this.getTasks();
         return {
             goal: this._goal,
@@ -443,37 +425,6 @@ export class PlanDatabase {
         return result;
     }
 
-    /** Async transaction: same semantics but supports async callbacks. */
-    async transactionAsync<T>(fn: (tx: PlanTransaction) => Promise<T>): Promise<T> {
-        const snapshot = this.getSnapshot();
-        const tx = new PlanTransaction(
-            snapshot.goal,
-            snapshot.currentTaskId,
-            new Map(snapshot.tasks),
-            [...snapshot.taskOrder],
-            new Set(snapshot.attributes)
-        );
-
-        // Execute async callback — may throw to abort.
-        const result = await fn(tx);
-
-        // Validate the transaction's accumulated state.
-        this.validateTransactionSnapshot(tx.buildSnapshot());
-
-        // Commit: replace internal state with validated snapshot.
-        const committed = tx.getSnapshot();
-        this._goal = committed.goal;
-        this._currentTaskId = committed.currentTaskId;
-        this._tasks = new Map(committed.tasks);
-        this._taskOrder = [...committed.taskOrder];
-        this._attributes = new Set(committed.attributes);
-        this._isDirty = true;
-
-        // Notify listeners of change.
-        this.notifyListeners();
-
-        return result;
-    }
 
     /** @internal Run the full validation pipeline against a snapshot plan shape. Throws on failure. */
     private validateTransactionSnapshot(plan: OrchestrationPlan): void {
@@ -489,14 +440,14 @@ export class PlanDatabase {
             }
         }
 
-        // 2. Auto-heal file conflicts (mutates plan.tasks in place).
-        autoHealFileConflicts(plan.tasks);
-
-        // 3. Cycle detection.
+        // 2. Cycle detection (must run before any DFS-based ancestor computation).
         const cycle = detectCycle(plan);
         if (cycle) {
             throw new Error(`Circular dependency detected: ${cycle.join(" → ")}`);
         }
+
+        // 3. Auto-heal file conflicts (mutates plan.tasks in place; safe after cycle check).
+        autoHealFileConflicts(plan.tasks);
 
         // 4. File conflict detection (after auto-heal, should be clean).
         const conflicts = detectFileConflicts(plan);

@@ -1,6 +1,31 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OrchestrationPlan, Task } from "../core/types";
+import type { PlanDatabase } from "../core/plan-database";
 import { OrchestratorState } from "../core";
+
+/**
+ * Find the next task that needs work, or null if all done.
+ * Checks currentTaskId first (if not completed), then finds a ready pending/failed task,
+ * and finally returns any non-completed task as a fallback.
+ */
+export function findNextTaskToRun(planDb: PlanDatabase): Task | null {
+    const tasks = planDb.getTasks();
+    const currentTaskId = planDb.getCurrentTaskId();
+    const currentTask = currentTaskId ? tasks.find((t) => t.id === currentTaskId) : undefined;
+    if (currentTask && currentTask.status !== "completed") {
+        return currentTask;
+    }
+    const completedTaskIds = new Set(tasks.filter((t) => t.status === "completed").map((t) => t.id));
+    const readyTask = tasks.find((t) => {
+        if (t.status !== "pending" && t.status !== "failed") return false;
+        const deps = t.dependencies || [];
+        return deps.every((depId) => completedTaskIds.has(depId));
+    });
+    if (readyTask) return readyTask;
+
+    const nonCompleted = tasks.find((t) => t.status !== "completed");
+    return nonCompleted || null;
+}
 
 /** Regex patterns for extracting a short title from notification messages. */
 const TASK_NAME_RE = /Task '([^']+)'/;

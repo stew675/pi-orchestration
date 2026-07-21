@@ -293,7 +293,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             const oldStatus = task.status;
 
             // If the task is currently running, kill its specific process (I/O — outside transaction)
-            if (task.status === "running" || task.status === "validating") {
+            if (oldStatus === "running" || oldStatus === "validating") {
                 for (const [child, info] of activeProcesses.entries()) {
                     const labelParts = info.label.split(" ");
                     if (labelParts.includes(params.taskId)) {
@@ -310,12 +310,16 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             Runner.cancelTaskSummary(params.taskId);
 
             planDb.transaction((tx) => {
+                const t = tx.getTask(params.taskId);
+                if (!t) {
+                    throw new Error(`Task '${params.taskId}' not found.`);
+                }
                 tx.updateTask(params.taskId, {
                     status: "completed",
                     clarificationAttempts: 0,
                     validatorFeedback: undefined,
                     result: {
-                        ...(task.result || {}),
+                        ...(t.result || {}),
                         summary: params.summary || "Task forcibly marked as complete by orchestrator.",
                         manuallyCompleted: true
                     }
