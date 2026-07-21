@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { PLANNING_HINT_EDIT } from "../context/prompts";
 import { killAllProcesses } from "../process/process-manager";
 import { buildFinalReviewMessage, notifyTuiOnly } from "../runner/utils";
@@ -111,9 +111,6 @@ function handleResumeCodeReview(pi: ExtensionAPI) {
             notifyTuiOnly(pi, "Failed to transition to implementing state on code review resume");
         }
     }
-    if (OrchestratorState.plan) {
-        StateManager.savePlan(OrchestratorState.plan);
-    }
     Runner.runTasks(pi).catch((err: Error) => {
         notifyTuiOnly(pi, "Code review resume error: " + String(err));
     });
@@ -139,7 +136,6 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
                     notifyTuiOnly(pi, "Failed to transition to implementing state on resume (code review model)");
                 }
             }
-            StateManager.savePlan(plan);
             Runner.runTasks(pi);
             return;
         }
@@ -151,7 +147,6 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
                 notifyTuiOnly(pi, "Failed to transition to verifying state on resume");
             }
         }
-        StateManager.savePlan(plan);
         const reviewMessage = buildFinalReviewMessage(
             plan,
             "System: All tasks completed on resume. Entering FINAL REVIEW."
@@ -169,7 +164,6 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
     }
 
     plan.currentTaskId = next.id;
-    StateManager.savePlan(plan);
     sendResumeMessage(
         pi,
         `System: Resuming execution. Task '${next.id}' is the next to run. Call orchestrate_start_task("${next.id}") to begin, then yield control.`
@@ -184,9 +178,6 @@ function handleResumePlanning(pi: ExtensionAPI) {
 }
 
 function handleResumeFailed(pi: ExtensionAPI) {
-    if (OrchestratorState.plan) {
-        StateManager.savePlan(OrchestratorState.plan);
-    }
     sendResumeMessage(
         pi,
         `System: Resuming from failed state. Use orchestrate_check_status to inspect, then orchestrate_replan to recover.`
@@ -204,7 +195,7 @@ function handleResumeFailed(pi: ExtensionAPI) {
  * safe and idempotent.
  */
 function resumePlanExecution(pi: ExtensionAPI) {
-    const plan = OrchestratorState.plan || StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (!plan) return;
 
     killAllProcesses("SIGKILL");
@@ -281,9 +272,6 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
 
         // Recover interrupted tasks
         const recovered = recoverInterruptedTasks();
-        if (recovered > 0) {
-            StateManager.savePlan(plan);
-        }
 
         ctx.ui.notify(
             recovered > 0
@@ -295,7 +283,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
         resumePlanExecution(pi);
     } else {
         // Discard - clear everything and start fresh
-        StateManager.clearPlan();
+        PersistenceManager.clearPlan();
         await enterPlanningWithCleanContext(pi, ctx);
         ctx.ui.notify("Previous plan discarded. Orchestration enabled in planning mode with a clean context.", "info");
     }
@@ -320,7 +308,7 @@ async function handleExistingImplPlan(
     if (useExisting) {
         // Keep implementation-plan.md; clear stale plan.json artifacts only
         if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
-            StateManager.clearPlanJsonOnly();
+            PersistenceManager.clearPlanJsonOnly();
         }
         await enterPlanningWithCleanContext(pi, ctx);
         ctx.ui.notify("Planning mode enabled with existing plan on disk. Context cleared for clean slate.", "info");
@@ -338,7 +326,7 @@ async function handleExistingImplPlan(
         );
     } else {
         // Discard everything
-        StateManager.clearPlan();
+        PersistenceManager.clearPlan();
         await enterPlanningWithCleanContext(pi, ctx);
         ctx.ui.notify("Previous plan discarded. Orchestration enabled in planning mode with a clean context.", "info");
     }
@@ -349,7 +337,7 @@ async function handleExistingImplPlan(
  */
 async function handleFreshStart(plan: OrchestrationPlan | null, pi: ExtensionAPI, ctx: ExtensionContext) {
     if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
-        StateManager.clearPlan();
+        PersistenceManager.clearPlan();
     }
     await enterPlanningWithCleanContext(pi, ctx);
     ctx.ui.notify("Orchestration enabled in planning mode with a clean context.", "info");
@@ -379,7 +367,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             if (!ok) return;
 
             // Check for existing incomplete plan
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
                 await handleResumeExistingPlan(plan, pi, ctx);
                 return;
@@ -391,7 +379,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             // 2. No plan.json at all + orphaned implementation-plan.md from a prior session
             //
             // IMPORTANT: load the impl plan BEFORE clearing anything, since clearPlan() deletes it.
-            const existingImplPlan = StateManager.loadImplementationPlan();
+            const existingImplPlan = PersistenceManager.loadImplementationPlan();
             if (existingImplPlan && existingImplPlan.trim()) {
                 await handleExistingImplPlan(existingImplPlan, plan, pi, ctx);
                 return;
@@ -439,7 +427,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     }
 
     // Guard: implementation-plan.md must exist and have content.
-    const implPlan = StateManager.loadImplementationPlan();
+    const implPlan = PersistenceManager.loadImplementationPlan();
     if (!implPlan || !implPlan.trim()) {
         ctx.ui.notify(
             "Cannot start execution - the implementation plan is empty. Please create a plan with the agent first.",
@@ -465,12 +453,11 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     const planPayload =
         implPlan && implPlan.trim() ? `\n\n--- Approved Implementation Plan ---\n${implPlan}\n--- End of Plan ---` : "";
 
-    const plan = StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed" && plan.tasks.length > 0) {
         if (!plan.attributes) plan.attributes = [];
         if (!plan.attributes.includes("PLAN_APPROVED")) plan.attributes.push("PLAN_APPROVED");
         setOrchestrationMode("setup", pi, refreshBorder);
-        StateManager.savePlan(plan);
         const pendingTasks = plan.tasks.filter((t) => t.status === "pending");
         ctx.ui.notify(`Execution approved! ${pendingTasks.length} task(s) ready. Waking orchestrator.`, "info");
         pi.sendMessage(
@@ -488,8 +475,8 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
             tasks: [],
             attributes: ["PLAN_APPROVED"]
         };
+        OrchestratorState.plan = newPlan;
         setOrchestrationMode("setup", pi, refreshBorder);
-        StateManager.savePlan(newPlan);
 
         ctx.ui.notify("Execution approved! Waking orchestrator to create tasks and begin.", "info");
         pi.sendMessage(
@@ -612,8 +599,8 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 return;
             }
 
-            // Check for existing plan on disk
-            const existingPlan = StateManager.loadPlan();
+            // Check for existing plan
+            const existingPlan = OrchestratorState.plan;
             if (existingPlan) {
                 const choice = await ctx.ui.confirm(
                     "Resume editing existing plan?",
@@ -622,7 +609,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
                 if (!choice) {
                     // Discard - clear everything and start fresh
-                    StateManager.clearPlan();
+                    PersistenceManager.clearPlan();
                 }
             }
 
@@ -662,9 +649,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                     ctx.ui.notify("Cannot pause execution", "error");
                     return;
                 }
-                if (OrchestratorState.plan) {
-                    StateManager.savePlan(OrchestratorState.plan);
-                }
                 ctx.ui.notify(
                     "Orchestration pausing gracefully - current task will finish, then execution stops.",
                     "warning"
@@ -689,7 +673,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Resume orchestration from the last known state (after crash or pause)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) {
                 ctx.ui.notify("No orchestration plan found. Describe a goal or plan with the agent.", "warning");
                 return;
@@ -706,9 +690,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
             // Recover interrupted tasks
             const recovered = recoverInterruptedTasks();
-            if (recovered > 0) {
-                StateManager.savePlan(plan);
-            }
 
             await exitPlanningMode(pi, ctx);
             setOrchestrationMode(inferred, pi, refreshBorder);
@@ -728,7 +709,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Immediately stop all running sub-agents (can be resumed later)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) {
                 ctx.ui.notify("No active orchestration plan.", "warning");
                 return;
@@ -741,7 +722,6 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (!transitionTo("stopped")) {
                 notifyTuiOnly(pi, "Failed to transition to stopped state on /om-stop");
             }
-            StateManager.savePlan(plan);
 
             ctx.ui.notify("Orchestration stopped. Plan preserved - use /om-resume to continue.", "warning");
         }
@@ -755,7 +735,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (ok) {
                 killAllProcesses("SIGKILL");
 
-                StateManager.clearPlan();
+                PersistenceManager.clearPlan();
                 await exitPlanningMode(pi, ctx);
                 OrchestratorState._inReviewPhase = false;
                 setOrchestrationMode("planning", pi, refreshBorder);

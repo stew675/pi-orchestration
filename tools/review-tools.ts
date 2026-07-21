@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
 import { Runner } from "../runner";
 import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG } from "../core";
 import { refreshBorder } from "../ui/ui";
@@ -29,7 +28,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             if (OrchestratorState.currentState === "code_review") {
@@ -62,7 +61,6 @@ export function registerReviewTools(pi: ExtensionAPI) {
 
             // Transition to completed state and out of execution mode via the state machine
             setOrchestrationMode("completed", getPi(), refreshBorder);
-            StateManager.savePlan(plan);
 
             return {
                 content: [
@@ -84,7 +82,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
         parameters: Type.Object({}),
         async execute() {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             if (OrchestratorState.currentState !== "code_review") {
@@ -111,7 +109,6 @@ export function registerReviewTools(pi: ExtensionAPI) {
             if (!transitionTo("verifying")) {
                 throw new Error("Failed to transition to verifying state after code review");
             }
-            StateManager.savePlan(plan);
 
             // Wake up the orchestrator model and enter final review
             const reviewMessage = buildFinalReviewMessage(plan, "System: Code review complete. Entering FINAL REVIEW.");

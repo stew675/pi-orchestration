@@ -1,9 +1,9 @@
 import type { ModelRef, Task } from "../core/types";
 import { READ_ONLY_TOOLS } from "../core/types";
+import { PersistenceManager } from "../context/persistence";
 import { OrchestratorState, getPi } from "../core";
-import { StateManager } from "../context/state-manager";
 import { runReadOnlyAgent } from "./subagent-spawner";
-import { savePlanSafely, notifyTuiOnly } from "./utils";
+import { notifyTuiOnly } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
 
 
@@ -69,7 +69,7 @@ function resetSummarySemaphore(): void {
 export async function completeTaskWithSummary(task: Task, model?: ModelRef, sessionTranscript?: string): Promise<void> {
     if (OrchestratorState.shuttingDown) return;
 
-    const p = StateManager.loadPlan();
+    const p = OrchestratorState.plan;
     if (!p) return;
 
     const planTask = p.tasks.find((x) => x.id === task.id);
@@ -77,7 +77,6 @@ export async function completeTaskWithSummary(task: Task, model?: ModelRef, sess
         planTask.status = "summarizing";
         planTask.clarificationAttempts = 0;
     }
-    savePlanSafely(p);
 
     // Capture the data we need for summarization before the plan is reloaded
     const taskId = task.id;
@@ -188,7 +187,7 @@ function resumeRunnerAfterSummary(): void {
 
 /** Apply the summary result to the task in plan.json. */
 function finalizeTaskSummary(taskId: string, result: { summary?: string; error?: string } | null): void {
-    const p = StateManager.loadPlan();
+    const p = OrchestratorState.plan;
     if (!p) {
         notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Plan not found - cannot finalize summary. Task will remain in its current state until the next recovery cycle.`);
         return;
@@ -204,7 +203,6 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
         notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Failed to generate summary: ${result.error}`);
         t.status = "failed";
         t.validatorFeedback = `Summary generation failed: ${result.error}`;
-        savePlanSafely(p);
 
         resumeRunnerAfterSummary();
         return;
@@ -215,15 +213,13 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
     t.result = { ...(t.result || {}), summary: summaryText };
 
-    savePlanSafely(p);
-
     // Now that it's actually completed (with summary), archive the final result.
-    StateManager.archiveTaskResult(taskId, {
+    PersistenceManager.archiveTaskResult(taskId, {
         status: t.status,
         summary: t.result?.summary,
         feedback: t.validatorFeedback
     });
-    StateManager.archiveTaskPrompt(taskId);
+    PersistenceManager.archiveTaskPrompt(taskId);
 
     // Wake up the runner if execution is active so the next ready task can start!
     resumeRunnerAfterSummary();
@@ -322,14 +318,14 @@ async function generateTaskSummary(
 
     const promptContent = buildSummaryPrompt(task.id, task.description, artifactFiles, sessionTranscript);
     // Persist the summary prompt for debugging - survives process exit.
-    StateManager.persistSummaryPrompt(task.id, promptContent);
+    PersistenceManager.persistSummaryPrompt(task.id, promptContent);
 
     const maxAttempts = 2;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const result = await runSummaryOnce(task.id, promptContent, model, attempt + 1);
         // Success - persist response and return.
         if (result.summary) {
-            StateManager.persistSummaryResponse(task.id, result.summary);
+            PersistenceManager.persistSummaryResponse(task.id, result.summary);
             return { summary: result.summary };
         }
         // Retryable failure (no output or crash)
@@ -338,7 +334,7 @@ async function generateTaskSummary(
 
     // All attempts exhausted - persist final error.
     const lastError = `Summary generation failed after ${maxAttempts} attempts.`;
-    StateManager.persistSummaryError(task.id, lastError);
+    PersistenceManager.persistSummaryError(task.id, lastError);
     return { error: lastError };
 }
 

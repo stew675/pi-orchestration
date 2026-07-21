@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { OrchestratorState } from "../core";
-import { StateManager } from "../context/state-manager";
 
 /** Regex patterns for extracting a short title from notification messages. */
 const TASK_NAME_RE = /Task '([^']+)'/;
@@ -68,8 +67,8 @@ function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void 
             const verbMatch = beforeAction.match(ACTION_VERB_RE);
             title = `${taskName} ${verbMatch ? verbMatch[1] : "event"}`;
         } else {
-            // Fall back to first 60 chars after stripping "System:" prefix.
-            title = message.substring(0, 60).replace(SYSTEM_PREFIX_RE, "").trim() || "Orchestration event";
+            // Fall back to first 110 chars after stripping "System:" prefix.
+            title = message.substring(0, 110).replace(SYSTEM_PREFIX_RE, "").trim() || "Orchestration event";
         }
 
         pi.appendEntry("orchestration-status", {
@@ -80,13 +79,6 @@ function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void 
     } catch (e) {
         // Non-fatal - status entry is purely cosmetic. The sendMessage below still works.
         // Non-fatal - TUI status entry is purely cosmetic, ignoring error
-    }
-}
-
-/** Guard against writing stale state after session_shutdown has begun. */
-export function savePlanSafely(plan: OrchestrationPlan): void {
-    if (!OrchestratorState.shuttingDown) {
-        StateManager.savePlan(plan);
     }
 }
 

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
 import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
@@ -97,7 +97,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 );
             }
 
-            let plan = StateManager.loadPlan();
+            let plan = OrchestratorState.plan;
 
             const effectiveTimeout = clampTaskTimeout(params.timeoutMs);
 
@@ -139,7 +139,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     }
 
                     const simulatedPlan = { ...plan, tasks: simulatedTasks };
-                    await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
+                    await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
 
                     // All checks passed - safe to mutate.
                     if (params.replacesTaskId) {
@@ -177,7 +177,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 };
             }
 
-            StateManager.savePlan(plan);
+            OrchestratorState.plan = plan;
 
             // --- Silent guidance (model sees it, user doesn't) ---
             const warnings: string[] = [];
@@ -253,7 +253,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             try {
@@ -277,8 +277,6 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     `Task '${params.taskId}' was NOT deleted. The plan is unchanged.\n\nReason: ${(e as Error).message}`
                 );
             }
-
-            StateManager.savePlan(plan);
 
             return {
                 content: [{ type: "text", text: `Task '${params.taskId}' deleted.` }],
@@ -309,7 +307,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             const task = plan.tasks.find((t) => t.id === params.taskId);
@@ -344,8 +342,6 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 manuallyCompleted: true
             };
 
-            StateManager.savePlan(plan);
-
             return {
                 content: [{ type: "text", text: `Task '${params.taskId}' marked as completed (was: ${oldStatus}).` }],
                 details: {}
@@ -378,7 +374,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             const task = plan.tasks.find((t) => t.id === params.taskId);
@@ -405,7 +401,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     ...plan,
                     tasks: plan.tasks.map((t) => (t.id === params.taskId ? editedTask : t))
                 };
-                await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
+                await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
 
                 // All checks passed - safe to mutate.
                 if (params.description !== undefined) task.description = params.description;
@@ -427,8 +423,6 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 );
             }
 
-            StateManager.savePlan(plan);
-
             return {
                 content: [{ type: "text", text: `Task '${params.taskId}' updated and reset to pending.` }],
                 details: {}
@@ -447,7 +441,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
-            const md = StateManager.getMarkdownPlan();
+            const md = PersistenceManager.getMarkdownPlan();
             if (!md) return { content: [{ type: "text", text: "No plan exists yet." }], details: {} };
 
             return {
@@ -479,7 +473,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            let plan = StateManager.loadPlan();
+            let plan = OrchestratorState.plan;
             if (!plan) throw new Error("No active plan found to bulk update.");
 
             const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];
@@ -548,11 +542,10 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
 
             // Run full validations on the simulated graph
             const simulatedPlan = { ...plan, tasks: simulatedTasks };
-            await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
+            await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
 
             // Success: Commit the transaction
             plan.tasks = simulatedTasks;
-            StateManager.savePlan(plan);
 
             return {
                 content: [{ type: "text", text: `Bulk update transaction completed successfully. Modified ${params.updates.length} task(s).` }],

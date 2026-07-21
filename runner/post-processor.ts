@@ -1,9 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Task } from "../core/types";
 import { MAX_CLARIFICATIONS } from "../core/types";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { OrchestratorState } from "../core";
-import { notifyOrchestrator, savePlanSafely, notifyTuiOnly } from "./utils";
+import { notifyOrchestrator, notifyTuiOnly } from "./utils";
 import { transitionTo } from "../core/state-machine";
 import { refreshUiStatus } from "../ui/ui";
 
@@ -53,12 +53,12 @@ function notifyAndStop(pi: ExtensionAPI | undefined, message: string): boolean {
 
 /** Archive the task result and prompt for audit/debugging. */
 function archiveTask(task: Task): void {
-    StateManager.archiveTaskResult(task.id, {
+    PersistenceManager.archiveTaskResult(task.id, {
         status: task.status,
         summary: task.result?.summary,
         feedback: task.validatorFeedback
     });
-    StateManager.archiveTaskPrompt(task.id);
+    PersistenceManager.archiveTaskPrompt(task.id);
 }
 
 /**
@@ -67,7 +67,7 @@ function archiveTask(task: Task): void {
  */
 export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
     try {
-        const postPlan = StateManager.loadPlan();
+        const postPlan = OrchestratorState.plan;
         if (!postPlan) return false;
 
         const postTask = postPlan.tasks.find((t) => t.id === task.id);
@@ -93,7 +93,6 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
             if (!transitionTo("failed")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state in post-processor");
             }
-            savePlanSafely(postPlan);
             refreshUiStatus();
 
             const feedback = postTask.validatorFeedback || "";
@@ -110,9 +109,6 @@ export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
             // Transition to paused state
             if (!transitionTo("paused")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to paused state in post-processor");
-            }
-            if (postPlan) {
-                savePlanSafely(postPlan);
             }
             refreshUiStatus();
             return notifyAndStop(pi, `System: Paused gracefully after task '${task.id}'.`);

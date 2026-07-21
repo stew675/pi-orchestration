@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { StateManager, drainPlanChangeListeners, startPlanSaveTimer, stopPlanSaveTimer } from "./context/state-manager";
+import { PersistenceManager, drainPlanChangeListeners, startPlanSaveTimer, stopPlanSaveTimer } from "./context/persistence";
 import { Runner } from "./runner";
 import { killAllProcesses, activeProcesses } from "./process/process-manager";
 import {
@@ -82,7 +82,7 @@ export default function (pi: ExtensionAPI) {
 
                 // --- Orchestrator stall detection ---
                 // Watchdog: Kick the orchestrator if it stalls during execution mode.
-                const plan = StateManager.loadPlan();
+                const plan = OrchestratorState.plan;
                 if (
                     !isExecutingMode(OrchestratorState.currentState) ||
                     ["paused", "stopped", "pausing"].includes(OrchestratorState.currentState) ||
@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
 
         // Just notify about an existing plan - don't auto-activate orchestration.
         // The user must explicitly run /om-enable to proceed.
-        OrchestratorState.plan = StateManager.loadPlan();
+        OrchestratorState.plan = PersistenceManager.loadPlan();
         const plan = OrchestratorState.plan;
         if (plan) {
             const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
@@ -163,7 +163,7 @@ export default function (pi: ExtensionAPI) {
             const recovered = recoverInterruptedTasks();
             if (recovered > 0) {
                 try {
-                    StateManager.savePlan(OrchestratorState.plan);
+                    PersistenceManager.savePlan(OrchestratorState.plan);
                 } catch (e) {
                     notifyTuiOnly(pi, "Failed to persist recovered tasks during shutdown: " + String(e));
                 }
@@ -363,18 +363,14 @@ export default function (pi: ExtensionAPI) {
                 );
 
                 // Force transition to completed and notify user.
-                const plan = StateManager.loadPlan();
+                const plan = OrchestratorState.plan;
                 if (plan) {
                     try {
                         import("./core/state-machine").then(({ transitionTo }) => {
                             transitionTo("completed");
-                            const updatedPlan = StateManager.loadPlan();
-                            if (updatedPlan) {
-                                if (!updatedPlan.attributes) updatedPlan.attributes = [];
-                                if (!updatedPlan.attributes.includes("VERIFIED")) {
-                                    updatedPlan.attributes.push("VERIFIED");
-                                }
-                                StateManager.savePlan(updatedPlan);
+                            plan.attributes = plan.attributes || [];
+                            if (!plan.attributes.includes("VERIFIED")) {
+                                plan.attributes.push("VERIFIED");
                             }
                         });
                     } catch (e) {

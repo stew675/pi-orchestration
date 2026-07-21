@@ -2,8 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef, OrchestrationPlan, Task } from "../core/types";
 import { ACTIVE_TASK_STATUSES } from "../core/types";
 import { OrchestratorState } from "../core";
-import { StateManager } from "../context/state-manager";
-import { notifyOrchestrator, savePlanSafely, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
+import { PersistenceManager } from "../context/persistence";
+import { notifyOrchestrator, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
 import { getCurrentOrchestrationState, transitionTo } from "../core/state-machine";
 import { refreshUiStatus } from "../ui/ui";
@@ -41,12 +41,12 @@ export async function runTasks(
         let taskToRun: Task | undefined;
 
         try {
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) {
                 notifyTuiOnly(pi, "Runner: No plan found.");
                 notifyOrchestrator(
                     pi,
-                    "System: plan.json is corrupted or unreadable. Execution stopped. Run /om-reset to start fresh."
+                    "System: No orchestration plan available. Execution stopped. Run /om-reset to start fresh."
                 );
                 return;
             }
@@ -103,7 +103,6 @@ export async function runTasks(
                     if (!transitionTo("paused")) {
                         notifyTuiOnly(pi, "Failed to transition to paused state due to failed tasks");
                     }
-                    savePlanSafely(plan);
                     refreshUiStatus();
                     // Include failed task's feedback so orchestrator has context for recovery
                     const failedDetails = failedTasks
@@ -128,7 +127,6 @@ export async function runTasks(
                     if (!transitionTo("paused")) {
                         notifyTuiOnly(pi, "Failed to transition to paused state due to stalled execution");
                     }
-                    savePlanSafely(plan);
                     refreshUiStatus();
                     notifyOrchestrator(
                         pi,
@@ -188,7 +186,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
     const { awaitAllSummaries } = await import("./summarizer");
     await awaitAllSummaries();
 
-    const finalPlan = StateManager.loadPlan();
+    const finalPlan = OrchestratorState.plan;
     if (!finalPlan) return;
 
     // All tasks completed - enter final review (must wake orchestrator)
@@ -198,13 +196,12 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             if (!transitionTo("code_review")) {
                 notifyTuiOnly(pi, "Failed to transition to code_review state");
             }
-            savePlanSafely(finalPlan);
 
             // Refresh UI immediately so the status line shows CODE_REVIEW
             refreshUiStatus();
 
             // Delete old code-review.md if present
-            StateManager.deleteCodeReview();
+            PersistenceManager.deleteCodeReview();
 
             // Notify TUI only — do NOT wake the orchestrator while
             // the sub-agent is still running. It will be notified after verdict.
@@ -237,7 +234,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             // Inspect the resulting code-review.md file on disk (source of truth)
             let approved = false;
             let rejected = false;
-            const codeReviewPath = StateManager.getCodeReviewPath();
+            const codeReviewPath = PersistenceManager.getCodeReviewPath();
             if (fs.existsSync(codeReviewPath)) {
                 const content = fs.readFileSync(codeReviewPath, "utf-8");
                 const firstLine = content.split("\n")[0].trim();
@@ -248,7 +245,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 }
             }
 
-            const updatedPlan = StateManager.loadPlan();
+            const updatedPlan = OrchestratorState.plan;
             if (!updatedPlan) return;
 
             if (approved) {
@@ -262,7 +259,6 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 if (!transitionTo("verifying")) {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
-                savePlanSafely(updatedPlan);
                 refreshUiStatus();
                 const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
@@ -277,7 +273,6 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 if (!transitionTo("code_review")) {
                     notifyTuiOnly(pi, "Failed to transition to code_review state");
                 }
-                savePlanSafely(updatedPlan);
                 refreshUiStatus();
 
                 const wakeMessage = [
@@ -297,7 +292,6 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 if (!transitionTo("verifying")) {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
-                savePlanSafely(updatedPlan);
                 refreshUiStatus();
                 const reviewMessage = buildFinalReviewMessage(updatedPlan);
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
@@ -306,7 +300,6 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             if (!transitionTo("verifying")) {
                 notifyTuiOnly(pi, "Failed to transition to verifying state");
             }
-            savePlanSafely(finalPlan);
             refreshUiStatus();
 
             // Build a contextual wakeup message with task summaries so the orchestrator

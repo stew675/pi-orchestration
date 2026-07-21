@@ -5,10 +5,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef, Task } from "../core/types";
 import { MAX_CLARIFICATIONS, isTaskReadOnly } from "../core/types";
 import { OrchestratorState, resolveTaskModelByComplexity, resolveValidatorModel, resolveSummaryModel } from "../core";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { buildTaskContext } from "../context/context-builder";
 import * as monitor from "../process/monitor";
-import { notifyOrchestrator, savePlanSafely, notifyTuiOnly } from "./utils";
+import { notifyOrchestrator, notifyTuiOnly } from "./utils";
 import { runSubAgent } from "./subagent-spawner";
 import type { SubAgentResult } from "./subagent-spawner";
 import { validateTask } from "./validator";
@@ -33,15 +33,15 @@ export async function executeTask(
 
         // When resuming after clarification, check status
         if (clarificationData && clarificationData.taskId !== task.id) {
-            const refreshedPlan = StateManager.loadPlan();
+            const refreshedPlan = OrchestratorState.plan;
             if (refreshedPlan) {
                 const refreshedTask = refreshedPlan.tasks.find((t) => t.id === task.id);
                 if (refreshedTask && refreshedTask.status === "completed") return true;
             }
         }
 
-        // Refresh plan state in case user paused/stopped
-        const currentPlan = StateManager.loadPlan();
+        // Use canonical in-memory plan
+        const currentPlan = OrchestratorState.plan;
         if (!currentPlan) return false;
 
         const currentState = getCurrentOrchestrationState();
@@ -57,8 +57,6 @@ export async function executeTask(
         planTask.status = "running";
         planTask.startedAt = Date.now();
         currentPlan.currentTaskId = task.id;
-
-        savePlanSafely(currentPlan);
 
         // Inform user via UI
         pi?.sendMessage(
@@ -83,14 +81,13 @@ export async function executeTask(
 
         // Reset orphaned task status so scheduler can retry on next cycle.
         try {
-            const p = StateManager.loadPlan();
+            const p = OrchestratorState.plan;
             if (p) {
                 const t = p.tasks.find((x) => x.id === task.id);
                 if (t && t.status === "running") {
                     t.status = "pending";
                     t.attempts++;
                     delete t.startedAt;
-                    savePlanSafely(p);
                     notifyTuiOnly(pi || OrchestratorState.pi, `Task ${task.id} reset from 'running' to 'pending' after unexpected error.`);
                 }
             }
@@ -129,14 +126,9 @@ function handleClarification(task: Task, clarificationFile: string): boolean {
             task.status = "awaiting_clarification";
             task.clarificationQuery = cData.query;
         }
-
-        const p = StateManager.loadPlan();
-        if (p) savePlanSafely(p);
     } catch (e) {
         task.status = "failed";
         task.validatorFeedback = `Sub-agent attempted to write clarification but the file was invalid/malformed: ${(e as Error).message}`;
-        const p = StateManager.loadPlan();
-        if (p) savePlanSafely(p);
     }
 
     return true; // caller should stop regardless of outcome
@@ -144,8 +136,8 @@ function handleClarification(task: Task, clarificationFile: string): boolean {
 
 /** Handle successful (code 0) sub-agent exit. Routes through validation and summarization. */
 async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, model?: ModelRef): Promise<void> {
-    // Load fresh plan state - always work from the plan's copy of the task
-    const p = StateManager.loadPlan();
+    // Work from the canonical in-memory plan
+    const p = OrchestratorState.plan;
     if (!p) return;
     const t = p.tasks.find((x) => x.id === task.id);
     if (!t) return;
@@ -156,12 +148,10 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
         const output = monitor.getCapturedLines(t.id);
         t.status = "failed";
         t.validatorFeedback = `Sub-agent process exited with code 0 but produced no assistant output (LLM may have crashed). Ran for ${elapsed}s.${output ? "\n\n" + output : ""}`;
-        savePlanSafely(p);
         return;
     }
 
     // Save plan with updated artifacts before continuing
-    savePlanSafely(p);
 
     const isReadOnly = isTaskReadOnly(t.taskType);
 
@@ -178,7 +168,6 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
 
     // --- Validation phase ---
     t.status = "validating";
-    savePlanSafely(p);
 
     const filesToValidate = t.result?.artifacts ?? (t.files || []);
     const fullTranscript = monitor.getFullTranscript(t.id);
@@ -198,7 +187,6 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
                 ...(t.result || {}),
                 summary: procResult.lastAssistantText || "Read-only task executed successfully."
             };
-            savePlanSafely(p);
         } else {
             await completeTaskWithSummary(t, resolveSummaryModel(model), fullTranscript);
         }
@@ -222,7 +210,6 @@ async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, mode
     } else {
         t.status = "failed";
         t.validatorFeedback = feedback || "Validation failed without feedback.";
-        savePlanSafely(p);
     }
 }
 
@@ -233,7 +220,7 @@ async function runTaskSubAgent(
     clarificationData?: { taskId: string; answer: string },
     _pi?: ExtensionAPI
 ): Promise<void> {
-    const plan = StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (!plan) return;
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-orch-"));
@@ -246,7 +233,7 @@ async function runTaskSubAgent(
             clarificationData && clarificationData.taskId === task.id ? clarificationData : undefined;
         const context = buildTaskContext(plan, task, clarificationFile, relevantClarification);
         fs.writeFileSync(promptFile, context, "utf-8");
-        StateManager.persistTaskPrompt(task.id, context);
+        PersistenceManager.persistTaskPrompt(task.id, context);
 
         // Spawn and wait for the sub-agent process.
         const procResult = await runSubAgent({
@@ -267,7 +254,7 @@ async function runTaskSubAgent(
             return;
         }
 
-        const p = StateManager.loadPlan();
+        const p = OrchestratorState.plan;
         if (!p) return;
 
         const t = p.tasks.find((x) => x.id === task.id);
@@ -277,14 +264,10 @@ async function runTaskSubAgent(
         const allRelevantFiles = new Set([...(t.files || []), ...procResult.discoveredArtifacts]);
         t.result = { summary: t.result?.summary || "", artifacts: Array.from(allRelevantFiles) };
 
-        // Save plan before further processing
-        savePlanSafely(p);
-
         // Handle spawn error first
         if (procResult.spawnError) {
             t.status = "failed";
             t.validatorFeedback = `Failed to spawn sub-agent: ${procResult.spawnError.message}`;
-            savePlanSafely(p);
             return;
         }
 
@@ -319,7 +302,6 @@ async function runTaskSubAgent(
             if (!transitionTo("failed")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after task kill");
             }
-            savePlanSafely(p);
             refreshUiStatus();
             return;
         }
@@ -339,7 +321,6 @@ async function runTaskSubAgent(
             if (!transitionTo("failed")) {
                 notifyTuiOnly(OrchestratorState.pi, "Failed to transition to failed state after non-zero exit");
             }
-            savePlanSafely(p);
             refreshUiStatus();
             return;
         }

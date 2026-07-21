@@ -2,7 +2,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { readTextFile } from "../utils/file-utils";
 import type { OrchestrationPlan, Task } from "../core/types";
-import { StateManager } from "./state-manager";
+import { PersistenceManager } from "./persistence";
 import { notifyTui as coreNotifyTui } from "../core";
 
 /** Warning appended after any JSON data block to prevent prompt injection. */
@@ -204,7 +204,7 @@ function isHeadingRelevant(heading: string, taskFiles: string[], descTokens: Set
  *  section extraction yields nothing useful.
  */
 function appendImplementationPlanReference(lines: string[], _plan: OrchestrationPlan, task: Task): void {
-    const implPlan = StateManager.loadImplementationPlan();
+    const implPlan = PersistenceManager.loadImplementationPlan();
     if (!implPlan || !implPlan.trim()) return;
 
     // Try to extract only the relevant sections for this task
@@ -404,7 +404,7 @@ export function buildCodeReviewContext(
     appendJsonDataBlock(context, { project_goal: plan.goal });
 
     // Inlined Implementation Plan
-    const implementationPlan = StateManager.loadImplementationPlan();
+    const implementationPlan = PersistenceManager.loadImplementationPlan();
     if (implementationPlan) {
         context.push("\n## Implementation Plan");
         context.push("Use the implementation plan as guidance for what was changed:");

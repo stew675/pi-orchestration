@@ -88,9 +88,9 @@ export function startPlanSaveTimer(): void {
     if (saveTimer) return;
     saveTimer = setInterval(() => {
         try {
-            StateManager.flushPlan();
+            PersistenceManager.flushPlan();
         } catch (e) {
-            coreNotifyTui("StateManager auto-save error: " + String(e));
+            coreNotifyTui("PersistenceManager auto-save error: " + String(e));
         }
     }, 1000);
     if (saveTimer.unref) {
@@ -363,7 +363,7 @@ export function safeWriteFile(targetPath: string, content: string): void {
  * task prompt persistence, and archive management. All public methods
  * are synchronous - they block the caller during I/O.
  */
-export class StateManager {
+export class PersistenceManager {
     /** Ensure all required directories exist on disk (orchestration/, plans/, tasks/, archive/, agent-logs/, summaries/, validations/). */
     static initDirs(): void {
         fs.mkdirSync(ORCHESTRATION_BASE, { recursive: true });
@@ -498,7 +498,7 @@ export class StateManager {
 
             notifyPlanChange();
         } catch (e) {
-            coreNotifyTui("StateManager: Failed to save plan.json - " + String(e));
+            coreNotifyTui("PersistenceManager: Failed to save plan.json - " + String(e));
         }
     }
 
@@ -677,7 +677,7 @@ export class StateManager {
 
     /** Build the Markdown string for the plan (used synchronously by renderMarkdown). */
     static buildMarkdownString(plan: OrchestrationPlan): string {
-        const esc = StateManager.escapeMdInline;
+        const esc = PersistenceManager.escapeMdInline;
         const lines: string[] = [];
 
         lines.push(`# Goal: ${esc(plan.goal)}\n`);
@@ -702,7 +702,7 @@ export class StateManager {
             }
             if (task.result?.summary) {
                 // Summaries contain their own markdown structure - preserve it
-                const safeSummary = StateManager.escapeMdContent(task.result.summary);
+                const safeSummary = PersistenceManager.escapeMdContent(task.result.summary);
                 lines.push(`    - Result:\n\n${safeSummary}`);
             }
             if (task.status === "failed" && task.validatorFeedback) {

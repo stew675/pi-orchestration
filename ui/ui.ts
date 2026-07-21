@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { CustomEditor, DynamicBorder, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { Container, Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { StateManager, onPlanChange } from "../context/state-manager";
+import { onPlanChange } from "../context/persistence";
 import {
     OrchestratorState,
     buildStatusSummary,
@@ -63,8 +63,8 @@ type SemanticColor = "success" | "warning" | "error" | "accent" | "text" | "dim"
 function getOrchestrationPhaseColor(): ((s: string) => string) | null {
     if (!stateIsActive(OrchestratorState.currentState) || !OrchestratorState.theme) return null;
 
-    const plan = StateManager.loadPlan();
-    // No plan on disk yet - orchestration is active, so we're in the initial planning phase.
+    const plan = OrchestratorState.plan;
+    // No plan yet - orchestration is active, so we're in the initial planning phase.
     if (!plan) {
         return OrchestratorState.theme.fg.bind(OrchestratorState.theme, "mdHeading");
     }
@@ -132,7 +132,7 @@ export function refreshUiStatus(ctx?: ExtensionContext) {
 
     // Update footer status line
     if (stateIsActive(OrchestratorState.currentState)) {
-        const plan = OrchestratorState.plan || StateManager.loadPlan();
+        const plan = OrchestratorState.plan;
         if (plan) {
             targetCtx.ui.setStatus("orchestrator", buildStatusSummary());
         }
@@ -652,7 +652,7 @@ function buildMonitorView(
  * Auto-refreshes on plan-change and monitor-change events.
  */
 export async function showOrchestratorStatus(ctx: ExtensionContext) {
-    const plan = StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (!plan) return;
 
     await ctx.ui.custom<void>(
@@ -714,7 +714,7 @@ export async function showOrchestratorStatus(ctx: ExtensionContext) {
             // --- Event listeners for live updates ---
             const onPlanChanged = onPlanChange(() => {
                 if (unsubscribed) return;
-                const refreshedPlan = StateManager.loadPlan();
+                const refreshedPlan = OrchestratorState.plan;
                 if (refreshedPlan) {
                     currentPlan = refreshedPlan;
                     cachedLines = null;
@@ -793,7 +793,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
     pi.on("session_start", async (_event, ctx: ExtensionContext) => {
         widgetCtx = ctx;
         // Show widget immediately if there's an existing plan
-        const plan = OrchestratorState.plan || StateManager.loadPlan();
+        const plan = OrchestratorState.plan;
         if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
             updateWidget(ctx);
         }
@@ -806,7 +806,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
             clearUI(ctx);
             return;
         }
-        const plan = OrchestratorState.plan || StateManager.loadPlan();
+        const plan = OrchestratorState.plan;
         if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
             updateWidget(ctx);
             ctx.ui.setStatus("orchestrator", buildStatusSummary());
@@ -823,7 +823,7 @@ export function setupUIWidget(pi: ExtensionAPI) {
         updateWidget(widgetCtx);
         refreshBorder();
         // Refresh footer status line
-        const plan = OrchestratorState.plan || StateManager.loadPlan();
+        const plan = OrchestratorState.plan;
         if (widgetCtx) {
             if (plan) {
                 widgetCtx.ui.setStatus("orchestrator", buildStatusSummary());
@@ -858,7 +858,7 @@ function updateWidget(ctx: ExtensionContext) {
         return;
     }
 
-    const plan = OrchestratorState.plan || StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (!plan || inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
         ctx.ui.setWidget("orchestrator-status", undefined);
         return;
