@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { StateManager } from "../context/state-manager";
 import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
