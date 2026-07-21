@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { CustomEditor, DynamicBorder, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { Container, Text, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { onPlanChange } from "../context/state-manager";
+import { onPlanChange } from "../context/persistence";
 import {
     OrchestratorState,
     buildStatusSummary,

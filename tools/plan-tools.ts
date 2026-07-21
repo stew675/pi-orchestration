@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
 import { isActive as stateIsActive } from "../core/state-machine";
 import { renderPlanResult, renderWritePlanCall, renderWritePlanResult } from "./shared";
@@ -32,7 +32,7 @@ export function registerPlanTools(pi: ExtensionAPI) {
         renderResult: renderWritePlanResult as any,
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            StateManager.saveImplementationPlan(params.content);
+            PersistenceManager.saveImplementationPlan(params.content);
             OrchestratorState._planEditedThisTurn = true;
 
             // Trigger review cycle or Accept/Edit dialog immediately after write
@@ -67,7 +67,7 @@ export function registerPlanTools(pi: ExtensionAPI) {
         renderResult: renderPlanResult,
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const result = StateManager.editImplementationPlan(params.oldText, params.newText);
+            const result = PersistenceManager.editImplementationPlan(params.oldText, params.newText);
             OrchestratorState._planEditedThisTurn = true;
             return toolResponse(result, false);
         }
@@ -93,7 +93,7 @@ export function registerPlanTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
-            const planContent = StateManager.loadImplementationPlan();
+            const planContent = PersistenceManager.loadImplementationPlan();
             if (!planContent || !planContent.trim()) {
                 return toolResponse("No implementation plan found on disk.");
             }
@@ -124,7 +124,7 @@ export function registerPlanTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            StateManager.savePlanReview(params.reviewContent);
+            PersistenceManager.savePlanReview(params.reviewContent);
             return toolResponse("Plan review saved to plan-review.md.");
         }
     });

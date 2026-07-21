@@ -1,6 +1,6 @@
 import type { ModelRef, Task } from "../core/types";
 import { READ_ONLY_TOOLS } from "../core/types";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { OrchestratorState, getPi } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
 import { notifyTuiOnly } from "./utils";
@@ -214,12 +214,12 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     t.result = { ...(t.result || {}), summary: summaryText };
 
     // Now that it's actually completed (with summary), archive the final result.
-    StateManager.archiveTaskResult(taskId, {
+    PersistenceManager.archiveTaskResult(taskId, {
         status: t.status,
         summary: t.result?.summary,
         feedback: t.validatorFeedback
     });
-    StateManager.archiveTaskPrompt(taskId);
+    PersistenceManager.archiveTaskPrompt(taskId);
 
     // Wake up the runner if execution is active so the next ready task can start!
     resumeRunnerAfterSummary();
@@ -318,14 +318,14 @@ async function generateTaskSummary(
 
     const promptContent = buildSummaryPrompt(task.id, task.description, artifactFiles, sessionTranscript);
     // Persist the summary prompt for debugging - survives process exit.
-    StateManager.persistSummaryPrompt(task.id, promptContent);
+    PersistenceManager.persistSummaryPrompt(task.id, promptContent);
 
     const maxAttempts = 2;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const result = await runSummaryOnce(task.id, promptContent, model, attempt + 1);
         // Success - persist response and return.
         if (result.summary) {
-            StateManager.persistSummaryResponse(task.id, result.summary);
+            PersistenceManager.persistSummaryResponse(task.id, result.summary);
             return { summary: result.summary };
         }
         // Retryable failure (no output or crash)
@@ -334,7 +334,7 @@ async function generateTaskSummary(
 
     // All attempts exhausted - persist final error.
     const lastError = `Summary generation failed after ${maxAttempts} attempts.`;
-    StateManager.persistSummaryError(task.id, lastError);
+    PersistenceManager.persistSummaryError(task.id, lastError);
     return { error: lastError };
 }
 

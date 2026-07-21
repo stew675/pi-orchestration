@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { PLANNING_HINT_EDIT } from "../context/prompts";
 import { killAllProcesses } from "../process/process-manager";
 import { buildFinalReviewMessage, notifyTuiOnly } from "../runner/utils";
@@ -283,7 +283,7 @@ async function handleResumeExistingPlan(plan: OrchestrationPlan, pi: ExtensionAP
         resumePlanExecution(pi);
     } else {
         // Discard - clear everything and start fresh
-        StateManager.clearPlan();
+        PersistenceManager.clearPlan();
         await enterPlanningWithCleanContext(pi, ctx);
         ctx.ui.notify("Previous plan discarded. Orchestration enabled in planning mode with a clean context.", "info");
     }
@@ -308,7 +308,7 @@ async function handleExistingImplPlan(
     if (useExisting) {
         // Keep implementation-plan.md; clear stale plan.json artifacts only
         if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
-            StateManager.clearPlanJsonOnly();
+            PersistenceManager.clearPlanJsonOnly();
         }
         await enterPlanningWithCleanContext(pi, ctx);
         ctx.ui.notify("Planning mode enabled with existing plan on disk. Context cleared for clean slate.", "info");
@@ -326,7 +326,7 @@ async function handleExistingImplPlan(
         );
     } else {
         // Discard everything
-        StateManager.clearPlan();
+        PersistenceManager.clearPlan();
         await enterPlanningWithCleanContext(pi, ctx);
         ctx.ui.notify("Previous plan discarded. Orchestration enabled in planning mode with a clean context.", "info");
     }
@@ -337,7 +337,7 @@ async function handleExistingImplPlan(
  */
 async function handleFreshStart(plan: OrchestrationPlan | null, pi: ExtensionAPI, ctx: ExtensionContext) {
     if (plan && inferStateFromTasks(plan.tasks, plan.attributes) === "completed") {
-        StateManager.clearPlan();
+        PersistenceManager.clearPlan();
     }
     await enterPlanningWithCleanContext(pi, ctx);
     ctx.ui.notify("Orchestration enabled in planning mode with a clean context.", "info");
@@ -379,7 +379,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             // 2. No plan.json at all + orphaned implementation-plan.md from a prior session
             //
             // IMPORTANT: load the impl plan BEFORE clearing anything, since clearPlan() deletes it.
-            const existingImplPlan = StateManager.loadImplementationPlan();
+            const existingImplPlan = PersistenceManager.loadImplementationPlan();
             if (existingImplPlan && existingImplPlan.trim()) {
                 await handleExistingImplPlan(existingImplPlan, plan, pi, ctx);
                 return;
@@ -427,7 +427,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     }
 
     // Guard: implementation-plan.md must exist and have content.
-    const implPlan = StateManager.loadImplementationPlan();
+    const implPlan = PersistenceManager.loadImplementationPlan();
     if (!implPlan || !implPlan.trim()) {
         ctx.ui.notify(
             "Cannot start execution - the implementation plan is empty. Please create a plan with the agent first.",
@@ -609,7 +609,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
 
                 if (!choice) {
                     // Discard - clear everything and start fresh
-                    StateManager.clearPlan();
+                    PersistenceManager.clearPlan();
                 }
             }
 
@@ -735,7 +735,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
             if (ok) {
                 killAllProcesses("SIGKILL");
 
-                StateManager.clearPlan();
+                PersistenceManager.clearPlan();
                 await exitPlanningMode(pi, ctx);
                 OrchestratorState._inReviewPhase = false;
                 setOrchestrationMode("planning", pi, refreshBorder);

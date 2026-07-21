@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
@@ -115,7 +115,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             // Pre-flight: validate for file conflicts before starting execution.
-            const archived = new Set(StateManager.getArchivedTasks());
+            const archived = new Set(PersistenceManager.getArchivedTasks());
             const conflicts = detectFileConflicts(plan, archived);
             if (conflicts.length > 0) {
                 throw new Error(

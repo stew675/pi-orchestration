@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 
 /** Tool names used by code-review sub-agents to signal verdict. */
 export const CODE_REVIEW_APPROVE_TOOL = "orchestrate_code_review_approve";
@@ -20,8 +20,8 @@ export function registerCodeReviewTools(pi: ExtensionAPI) {
         parameters: Type.Object({}),
         async execute() {
             // Delete old code-review.md if present, and write APPROVED
-            StateManager.deleteCodeReview();
-            StateManager.saveCodeReview("APPROVED\n");
+            PersistenceManager.deleteCodeReview();
+            PersistenceManager.saveCodeReview("APPROVED\n");
 
             return {
                 content: [
@@ -46,8 +46,8 @@ export function registerCodeReviewTools(pi: ExtensionAPI) {
         }),
         async execute(_id, params) {
             // Delete old code-review.md if present, and write CHANGES NEEDED followed by the review
-            StateManager.deleteCodeReview();
-            StateManager.saveCodeReview(`CHANGES NEEDED\n\n${params.review}`);
+            PersistenceManager.deleteCodeReview();
+            PersistenceManager.saveCodeReview(`CHANGES NEEDED\n\n${params.review}`);
 
             return {
                 content: [

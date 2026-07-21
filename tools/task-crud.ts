@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { Runner } from "../runner";
 import { activeProcesses } from "../process/process-manager";
 import { OrchestratorState, NOT_ACTIVE_MSG } from "../core";
@@ -139,7 +139,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     }
 
                     const simulatedPlan = { ...plan, tasks: simulatedTasks };
-                    await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
+                    await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
 
                     // All checks passed - safe to mutate.
                     if (params.replacesTaskId) {
@@ -401,7 +401,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                     ...plan,
                     tasks: plan.tasks.map((t) => (t.id === params.taskId ? editedTask : t))
                 };
-                await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
+                await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
 
                 // All checks passed - safe to mutate.
                 if (params.description !== undefined) task.description = params.description;
@@ -441,7 +441,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
-            const md = StateManager.getMarkdownPlan();
+            const md = PersistenceManager.getMarkdownPlan();
             if (!md) return { content: [{ type: "text", text: "No plan exists yet." }], details: {} };
 
             return {
@@ -542,7 +542,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
 
             // Run full validations on the simulated graph
             const simulatedPlan = { ...plan, tasks: simulatedTasks };
-            await validatePlan(simulatedPlan, new Set(StateManager.getArchivedTasks()));
+            await validatePlan(simulatedPlan, new Set(PersistenceManager.getArchivedTasks()));
 
             // Success: Commit the transaction
             plan.tasks = simulatedTasks;

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Task } from "../core/types";
 import { MAX_CLARIFICATIONS } from "../core/types";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { OrchestratorState } from "../core";
 import { notifyOrchestrator, notifyTuiOnly } from "./utils";
 import { transitionTo } from "../core/state-machine";
@@ -53,12 +53,12 @@ function notifyAndStop(pi: ExtensionAPI | undefined, message: string): boolean {
 
 /** Archive the task result and prompt for audit/debugging. */
 function archiveTask(task: Task): void {
-    StateManager.archiveTaskResult(task.id, {
+    PersistenceManager.archiveTaskResult(task.id, {
         status: task.status,
         summary: task.result?.summary,
         feedback: task.validatorFeedback
     });
-    StateManager.archiveTaskPrompt(task.id);
+    PersistenceManager.archiveTaskPrompt(task.id);
 }
 
 /**

@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef, OrchestrationPlan, Task } from "../core/types";
 import { ACTIVE_TASK_STATUSES } from "../core/types";
 import { OrchestratorState } from "../core";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { notifyOrchestrator, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
 import { getCurrentOrchestrationState, transitionTo } from "../core/state-machine";
@@ -201,7 +201,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             refreshUiStatus();
 
             // Delete old code-review.md if present
-            StateManager.deleteCodeReview();
+            PersistenceManager.deleteCodeReview();
 
             // Notify TUI only — do NOT wake the orchestrator while
             // the sub-agent is still running. It will be notified after verdict.
@@ -234,7 +234,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
             // Inspect the resulting code-review.md file on disk (source of truth)
             let approved = false;
             let rejected = false;
-            const codeReviewPath = StateManager.getCodeReviewPath();
+            const codeReviewPath = PersistenceManager.getCodeReviewPath();
             if (fs.existsSync(codeReviewPath)) {
                 const content = fs.readFileSync(codeReviewPath, "utf-8");
                 const firstLine = content.split("\n")[0].trim();

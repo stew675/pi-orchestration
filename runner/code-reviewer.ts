@@ -3,7 +3,7 @@ import type { ModelRef } from "../core/types";
 import { getEventToolName, isToolCallEvent } from "../core/types";
 import { OrchestratorState } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { buildCodeReviewContext } from "../context/context-builder";
 import { formatTimeout } from "../settings/time-utils";
 import {
@@ -103,7 +103,7 @@ export async function runCodeReview(
     }
 
     // Fallback to checking code-review.md on disk
-    const codeReviewPath = StateManager.getCodeReviewPath();
+    const codeReviewPath = PersistenceManager.getCodeReviewPath();
     if (fs.existsSync(codeReviewPath)) {
         const content = fs.readFileSync(codeReviewPath, "utf-8");
         if (content.startsWith("APPROVED")) {

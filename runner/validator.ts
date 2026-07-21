@@ -1,7 +1,7 @@
 import type { ModelRef } from "../core/types";
 import { getEventToolName, isToolCallEvent } from "../core/types";
 import { OrchestratorState } from "../core";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { runReadOnlyAgent } from "./subagent-spawner";
 import { buildValidatorContext } from "../context/context-builder";
 import { parseValidateToolCall, VALIDATOR_TOOLS } from "../tools/validator-tools";
@@ -66,7 +66,7 @@ export async function validateTask(
     const context = buildValidatorContext(taskDescription, artifactFiles, sessionTranscript, transcriptLogFile);
 
     // Persist the validator prompt for debugging
-    StateManager.persistValidationPrompt(taskId, context);
+    PersistenceManager.persistValidationPrompt(taskId, context);
 
     const maxAttempts = VALIDATOR_MAX_ATTEMPTS;
     let finalResult: { pass: boolean; feedback?: string } = { pass: false, feedback: FEEDBACK_NO_OUTPUT };
@@ -81,7 +81,7 @@ export async function validateTask(
     }
 
     // Persist the final validation response for debugging
-    StateManager.persistValidationResponse(taskId, finalResult || { pass: false, feedback: FEEDBACK_TIMEOUT });
+    PersistenceManager.persistValidationResponse(taskId, finalResult || { pass: false, feedback: FEEDBACK_TIMEOUT });
 
     return finalResult ?? { pass: false, feedback: FEEDBACK_TIMEOUT };
 }

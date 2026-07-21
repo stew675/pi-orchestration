@@ -5,7 +5,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ModelRef, Task } from "../core/types";
 import { MAX_CLARIFICATIONS, isTaskReadOnly } from "../core/types";
 import { OrchestratorState, resolveTaskModelByComplexity, resolveValidatorModel, resolveSummaryModel } from "../core";
-import { StateManager } from "../context/state-manager";
+import { PersistenceManager } from "../context/persistence";
 import { buildTaskContext } from "../context/context-builder";
 import * as monitor from "../process/monitor";
 import { notifyOrchestrator, notifyTuiOnly } from "./utils";
@@ -233,7 +233,7 @@ async function runTaskSubAgent(
             clarificationData && clarificationData.taskId === task.id ? clarificationData : undefined;
         const context = buildTaskContext(plan, task, clarificationFile, relevantClarification);
         fs.writeFileSync(promptFile, context, "utf-8");
-        StateManager.persistTaskPrompt(task.id, context);
+        PersistenceManager.persistTaskPrompt(task.id, context);
 
         // Spawn and wait for the sub-agent process.
         const procResult = await runSubAgent({

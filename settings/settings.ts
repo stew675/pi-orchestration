@@ -2,7 +2,7 @@ import { ModelRef } from "../core/types";
 import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { safeWriteFile } from "../context/state-manager";
+import { safeWriteFile } from "../context/persistence";
 import { notifyTui as coreNotifyTui } from "../core";
 
 import {
