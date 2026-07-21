@@ -54,10 +54,16 @@ export {
     setSubAgentMaxTurns,
     setVerifyingOrchestratorMaxTurns,
     setBooleanSetting,
-    setModelRef
+    setModelRef,
+    getPlanDb,
+    setPlanDb,
+    setPlanDbChangeListener
 } from "./state-singleton";
 
 export type { ExecutionPhaseLabel } from "./state-singleton";
+
+// ─── PlanDatabase ──────────────────────────────────────────────────
+export { PlanDatabase, PlanTransaction } from "./plan-database";
 
 // ─── State Machine Predicates ───────────────────────────────────────
 export {

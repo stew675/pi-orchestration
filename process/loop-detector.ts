@@ -177,6 +177,14 @@ const ORCHESTRATOR_LOOP_THRESHOLD = 4;
 
 /** Build a normalised signature for a single tool call (strips volatile params). */
 function _orchToolSignature(toolName: string, args: Record<string, unknown>): string {
+    // Exclude planning-phase CRUD tools from loop detection. These are called
+    // legitimately by the orchestrator during execution mode (replanning,
+    // adding remedial tasks) and would otherwise cause false-positive loop
+    // detection when called repeatedly in a single turn.
+    if (toolName === "orchestrate_add_task" || toolName === "orchestrate_edit_task") {
+        return "";
+    }
+
     const keyParams: string[] = [];
     if (args.taskId) keyParams.push(`taskId=${args.taskId}`);
     if (args.mode) keyParams.push(`mode=${args.mode}`);
@@ -252,8 +260,10 @@ class OrchestratorLoopDetector {
         if (this._pendingToolExecutions.size === 0) return "turn:none";
         const parts: string[] = [];
         for (const exec of this._pendingToolExecutions.values()) {
-            parts.push(_orchToolSignature(exec.toolName, exec.args));
+            const sig = _orchToolSignature(exec.toolName, exec.args);
+            if (sig) parts.push(sig); // skip excluded tools (e.g. orchestrate_add_task)
         }
+        if (parts.length === 0) return "turn:none"; // all tools were excluded
         // Sort is intentional - tool executions may fire in any order within a turn.
         parts.sort();
         return `turn:${parts.join("|")}`;

@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { PersistenceManager } from "../context/persistence";
 import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
-import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
+import { OrchestratorState, NOT_ACTIVE_MSG, getPi, getPlanDb } from "../core";
 import { isActive as stateIsActive, isExecutingMode } from "../core/state-machine";
 import { detectFileConflicts, formatFileConflictError } from "../validation/validation";
 import type { Task } from "../core/types";
@@ -31,18 +31,19 @@ export function registerExecutionControlTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
-            const plan = OrchestratorState.plan;
-            if (!plan) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
+            const planDb = getPlanDb();
+            if (!planDb) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
+            const tasks = planDb.getTasks();
             const completedTaskIds = new Set(
-                (plan.tasks || []).filter((t: Task) => t.status === "completed").map((t: Task) => t.id)
+                tasks.filter((t: Task) => t.status === "completed").map((t: Task) => t.id)
             );
 
             const ready: string[] = [];
             const running: string[] = [];
             const failed: string[] = [];
 
-            for (const task of plan.tasks || []) {
+            for (const task of tasks) {
                 if (task.status === "completed") continue;
 
                 if (ACTIVE_TASK_STATUSES.includes(task.status as string)) {
@@ -99,13 +100,13 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 );
             }
 
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
+            const planDb = getPlanDb();
+            if (!planDb) throw new Error("No plan exists.");
 
             // Signal that sub-agent execution has begun - loop detection can now activate.
             signalTaskStarted();
 
-            const task = plan.tasks.find((t) => t.id === params.taskId);
+            const task = planDb.getTask(params.taskId);
             if (!task) throw new Error(`Task '${params.taskId}' not found.`);
 
             if (task.status === "completed") {
@@ -116,7 +117,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             // Pre-flight: validate for file conflicts before starting execution.
             const archived = new Set(PersistenceManager.getArchivedTasks());
-            const conflicts = detectFileConflicts(plan, archived);
+            const conflicts = detectFileConflicts(planDb.toJSON(), archived);
             if (conflicts.length > 0) {
                 throw new Error(
                     `Cannot start task: ${formatFileConflictError(conflicts, "race condition detected in the plan")}\n\n` +
@@ -139,7 +140,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                     throw new Error("Failed to transition to implementing state");
                 }
             }
-            plan.currentTaskId = task.id;
+            planDb.transaction((tx) => { tx.setCurrentTaskId(task.id); });
 
             Runner.runTasks(getPi()).catch((err) => {
                 notifyTuiOnly(pi, "Runner error: " + String(err));
@@ -170,14 +171,14 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         parameters: Type.Object({}),
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = OrchestratorState.plan;
-            if (!plan) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
+            const planDb = getPlanDb();
+            if (!planDb) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
             // Return a concise summary - not the full markdown plan
             const lines: string[] = [];
-            lines.push(`Goal: ${plan.goal}`);
+            lines.push(`Goal: ${planDb.getGoal()}`);
             lines.push(`Status: ${OrchestratorState.currentState}`);
-            for (const task of plan.tasks || []) {
+            for (const task of planDb.getTasks()) {
                 lines.push(`  ${task.id} [${task.status}]: ${task.description}`);
             }
             return {
@@ -202,8 +203,8 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
+            const planDb = getPlanDb();
+            if (!planDb) throw new Error("No plan exists.");
 
             if (!transitionTo("replanning")) {
                 throw new Error("Failed to transition to replanning state");
@@ -240,24 +241,27 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 );
             }
 
-            const plan = OrchestratorState.plan;
-            if (!plan) throw new Error("No plan exists.");
+            const planDb = getPlanDb();
+            if (!planDb) throw new Error("No plan exists.");
 
-            const task = plan.tasks.find((t) => t.id === params.taskId);
+            const task = planDb.getTask(params.taskId);
             if (!task) throw new Error("Task not found.");
 
             if (task.status !== "awaiting_clarification") {
                 throw new Error("Task is not awaiting clarification.");
             }
 
-            // Mark task to resume
-            task.status = "pending";
-            // Record clarification in history before clearing the pending query
-            if (task.clarificationQuery) {
-                task.clarificationHistory ??= [];
-                task.clarificationHistory.push({ query: task.clarificationQuery, answer: params.answer });
-            }
-            task.clarificationQuery = undefined;
+            // Mark task to resume via transaction
+            planDb.transaction((tx) => {
+                tx.updateTask(params.taskId, {
+                    status: "pending",
+                    clarificationHistory: [
+                        ...(task.clarificationHistory || []),
+                        { query: task.clarificationQuery ?? "", answer: params.answer }
+                    ],
+                    clarificationQuery: undefined
+                });
+            });
 
             // Ensure we're still in implementing state after resume
             const currentState = getCurrentOrchestrationState();
@@ -329,8 +333,8 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             killAllProcesses("SIGKILL");
 
-            const plan = OrchestratorState.plan;
-            if (plan) {
+            const planDb = getPlanDb();
+            if (planDb) {
                 if (!transitionTo("stopped")) {
                     notifyTuiOnly(pi, "Failed to transition to stopped state on stop");
                 }

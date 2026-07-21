@@ -1,5 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PersistenceManager, drainPlanChangeListeners, startPlanSaveTimer, stopPlanSaveTimer } from "./context/persistence";
+import {
+    PersistenceManager,
+    drainPlanChangeListeners,
+    startPlanSaveTimer,
+    stopPlanSaveTimer,
+    wirePlanPersistence
+} from "./context/persistence";
 import { Runner } from "./runner";
 import { killAllProcesses, activeProcesses } from "./process/process-manager";
 import {
@@ -7,11 +13,13 @@ import {
     updateActiveTools,
     resetState,
     beginShutdown,
-    recoverInterruptedTasks,
     requireActive,
     switchToReviewerModel,
-    restoreFromReviewPhase
+    restoreFromReviewPhase,
+    setPlanDb,
+    getPlanDb
 } from "./core";
+import { PlanDatabase } from "./core/plan-database";
 import {
     registerEnableCommand,
     registerOrchestrationCommands,
@@ -42,7 +50,7 @@ import {
     resetLoopBreakerFlag,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
-import { isActive, isPlanningMode, isExecutingMode, inferStateFromTasks } from "./core/state-machine";
+import { isActive, isPlanningMode, isExecutingMode } from "./core/state-machine";
 
 import {
     ORCHESTRATOR_PLANNING_SYSTEM_PROMPT,
@@ -82,7 +90,7 @@ export default function (pi: ExtensionAPI) {
 
                 // --- Orchestrator stall detection ---
                 // Watchdog: Kick the orchestrator if it stalls during execution mode.
-                const plan = OrchestratorState.plan;
+                const plan = getPlanDb()?.toJSON() ?? null;
                 if (
                     !isExecutingMode(OrchestratorState.currentState) ||
                     ["paused", "stopped", "pausing"].includes(OrchestratorState.currentState) ||
@@ -123,18 +131,20 @@ export default function (pi: ExtensionAPI) {
 
         // Just notify about an existing plan - don't auto-activate orchestration.
         // The user must explicitly run /om-enable to proceed.
-        OrchestratorState.plan = PersistenceManager.loadPlan();
-        const plan = OrchestratorState.plan;
-        if (plan) {
-            const inferred = inferStateFromTasks(plan.tasks, plan.attributes);
-            if (inferred !== "completed") {
+        const parsedPlan = PersistenceManager.loadPlan();
+        setPlanDb(parsedPlan ? new PlanDatabase(parsedPlan) : null);
+        wirePlanPersistence();
+
+        const planDb = getPlanDb();
+        if (planDb) {
+            if (planDb.getStatus() !== "completed") {
                 ctx.ui.notify(
-                    `Incomplete orchestration plan found: "${plan.goal}". Run /om-enable to resume or discard.`,
+                    `Incomplete orchestration plan found: "${planDb.getGoal()}". Run /om-enable to resume or discard.`,
                     "warning"
                 );
             } else {
                 ctx.ui.notify(
-                    `Previous orchestration completed. Goal: "${plan.goal}". Run /om-enable to start a new plan.`,
+                    `Previous orchestration completed. Goal: "${planDb.getGoal()}". Run /om-enable to start a new plan.`,
                     "info"
                 );
             }
@@ -159,13 +169,14 @@ export default function (pi: ExtensionAPI) {
         drainPlanChangeListeners();
 
         // Recover in-flight tasks and save them back to 'pending' on disk
-        if (OrchestratorState.plan) {
-            const recovered = recoverInterruptedTasks();
-            if (recovered > 0) {
+        const planDb = getPlanDb();
+        if (planDb) {
+            const recovered = planDb.recoverInterruptedTasks();
+            if (recovered > 0 || planDb.isDirty()) {
                 try {
-                    PersistenceManager.savePlan(OrchestratorState.plan);
+                    PersistenceManager.flushPlan();
                 } catch (e) {
-                    notifyTuiOnly(pi, "Failed to persist recovered tasks during shutdown: " + String(e));
+                    notifyTuiOnly(pi, "Failed to persist plan during shutdown: " + String(e));
                 }
             }
         }
@@ -363,15 +374,11 @@ export default function (pi: ExtensionAPI) {
                 );
 
                 // Force transition to completed and notify user.
-                const plan = OrchestratorState.plan;
-                if (plan) {
+                const planDb = getPlanDb();
+                if (planDb) {
                     try {
                         import("./core/state-machine").then(({ transitionTo }) => {
                             transitionTo("completed");
-                            plan.attributes = plan.attributes || [];
-                            if (!plan.attributes.includes("VERIFIED")) {
-                                plan.attributes.push("VERIFIED");
-                            }
                         });
                     } catch (e) {
                         notifyTuiOnly(pi, "Failed during force-approve: " + String(e));
@@ -401,10 +408,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         // --- Orchestrator loop detection (execution mode only, after task assignment phase) ---
-        if (
-            isExecutingMode(OrchestratorState.currentState) &&
-            isPastTaskAssignmentPhase()
-        ) {
+        if (isExecutingMode(OrchestratorState.currentState) && isPastTaskAssignmentPhase()) {
             const signature = buildTurnSignature();
 
             if (getLastTurnSignature() === signature) {
@@ -498,7 +502,15 @@ function enforceSubAgentLimits(): void {
             const elapsedSinceLastActivity = Date.now() - state.lastActivityAt;
             if (elapsedSinceLastActivity > idleMs) {
                 const _p = OrchestratorState.pi;
-                if (_p) { try { _p.appendEntry("orchestration-status", { title: "Sub-agent idle timeout", message: `[watchdog] Sub-agent ${agentId} idle timeout — no JSON stream activity for ${formatTimeout(idleMs)} (last seen ${(elapsedSinceLastActivity / 1000).toFixed(0)}s ago). Killing.`, timestamp: Date.now() }); } catch {} }
+                if (_p) {
+                    try {
+                        _p.appendEntry("orchestration-status", {
+                            title: "Sub-agent idle timeout",
+                            message: `[watchdog] Sub-agent ${agentId} idle timeout — no JSON stream activity for ${formatTimeout(idleMs)} (last seen ${(elapsedSinceLastActivity / 1000).toFixed(0)}s ago). Killing.`,
+                            timestamp: Date.now()
+                        });
+                    } catch {}
+                }
                 child.kill("SIGTERM");
                 state.killedByWatchdog = "idle_timeout";
                 continue; // don't also check max-turns for the same agent
@@ -508,7 +520,15 @@ function enforceSubAgentLimits(): void {
         // Check max turns.
         if (maxTurns > 0 && state.turnCount >= maxTurns) {
             const _p = OrchestratorState.pi;
-            if (_p) { try { _p.appendEntry("orchestration-status", { title: "Sub-agent max turns exceeded", message: `[watchdog] Sub-agent ${agentId} exceeded max turns limit of ${maxTurns} (at turn ${state.turnCount}). Killing.`, timestamp: Date.now() }); } catch {} }
+            if (_p) {
+                try {
+                    _p.appendEntry("orchestration-status", {
+                        title: "Sub-agent max turns exceeded",
+                        message: `[watchdog] Sub-agent ${agentId} exceeded max turns limit of ${maxTurns} (at turn ${state.turnCount}). Killing.`,
+                        timestamp: Date.now()
+                    });
+                } catch {}
+            }
             child.kill("SIGTERM");
             state.killedByWatchdog = "max_turns";
         }

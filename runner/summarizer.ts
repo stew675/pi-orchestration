@@ -1,10 +1,24 @@
 import type { ModelRef, Task } from "../core/types";
 import { READ_ONLY_TOOLS } from "../core/types";
+import type { PlanTransaction } from "../core/plan-database";
 import { PersistenceManager } from "../context/persistence";
-import { OrchestratorState, getPi } from "../core";
+import { OrchestratorState, getPi, getPlanDb } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
 import { notifyTuiOnly } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
+
+// ---------------------------------------------------------------------------
+// Type declarations
+// ---------------------------------------------------------------------------
+
+/** Minimal task snapshot for summarization — avoids deep-clone of full Task. */
+interface SummaryTaskSnapshot {
+    id: string;
+    description?: string;
+    taskType?: Task["taskType"];
+    artifacts?: string[];
+    files?: string[];
+}
 
 
 // ---------------------------------------------------------------------------
@@ -66,22 +80,24 @@ function resetSummarySemaphore(): void {
  * - `summarizationConcurrency >= 1` → fire async summaries gated by the
  *   semaphore so at most N run concurrently; caller returns immediately.
  */
-export async function completeTaskWithSummary(task: Task, model?: ModelRef, sessionTranscript?: string): Promise<void> {
+export async function completeTaskWithSummary(
+    task: SummaryTaskSnapshot,
+    model?: ModelRef,
+    sessionTranscript?: string
+): Promise<void> {
     if (OrchestratorState.shuttingDown) return;
 
-    const p = OrchestratorState.plan;
-    if (!p) return;
+    const planDb = getPlanDb();
+    if (!planDb) return;
 
-    const planTask = p.tasks.find((x) => x.id === task.id);
-    if (planTask) {
-        planTask.status = "summarizing";
-        planTask.clarificationAttempts = 0;
-    }
+    planDb.transaction((tx: PlanTransaction) => {
+        tx.updateTask(task.id, { status: "summarizing", clarificationAttempts: 0 });
+    });
 
-    // Capture the data we need for summarization before the plan is reloaded
+    // Capture the data we need for summarization before any further mutations.
     const taskId = task.id;
     const taskDescription = task.description;
-    const artifactFiles = [...(task.result?.artifacts ?? task.files ?? [])];
+    const artifactFiles = [...(task.artifacts ?? task.files ?? [])];
 
     if (OrchestratorState.summarizationConcurrency >= 1) {
         // Async path - gate through the semaphore, then fire and forget
@@ -152,7 +168,7 @@ export function cancelTaskSummary(taskId: string): void {
 /** Run the summary sub-agent and resolve when done (async path). */
 async function runTaskSummaryAsync(
     taskId: string,
-    taskDescription: string,
+    taskDescription: string | undefined,
     artifactFiles: string[],
     model?: ModelRef,
     sessionTranscript?: string
@@ -187,37 +203,35 @@ function resumeRunnerAfterSummary(): void {
 
 /** Apply the summary result to the task in plan.json. */
 function finalizeTaskSummary(taskId: string, result: { summary?: string; error?: string } | null): void {
-    const p = OrchestratorState.plan;
-    if (!p) {
-        notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Plan not found - cannot finalize summary. Task will remain in its current state until the next recovery cycle.`);
-        return;
-    }
-
-    const t = p.tasks.find((x) => x.id === taskId);
-    if (!t) {
-        notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Task not found in plan - cannot finalize summary. The task may have been removed.`);
+    const planDb = getPlanDb();
+    if (!planDb) {
+        notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Plan database not found - cannot finalize summary. Task will remain in its current state until the next recovery cycle.`);
         return;
     }
 
     if (result?.error) {
         notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Failed to generate summary: ${result.error}`);
-        t.status = "failed";
-        t.validatorFeedback = `Summary generation failed: ${result.error}`;
+        planDb.transaction((tx: PlanTransaction) => {
+            tx.updateTask(taskId, { status: "failed", validatorFeedback: `Summary generation failed: ${result.error}` });
+        });
 
         resumeRunnerAfterSummary();
         return;
     }
 
-    t.status = "completed";
     const summaryText =
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
-    t.result = { ...(t.result || {}), summary: summaryText };
+
+    planDb.transaction((tx: PlanTransaction) => {
+        const existingResult = tx.getTask(taskId)?.result;
+        tx.updateTask(taskId, { status: "completed", result: { ...(existingResult || {}), summary: summaryText } });
+    });
 
     // Now that it's actually completed (with summary), archive the final result.
     PersistenceManager.archiveTaskResult(taskId, {
-        status: t.status,
-        summary: t.result?.summary,
-        feedback: t.validatorFeedback
+        status: "completed",
+        summary: summaryText,
+        feedback: undefined
     });
     PersistenceManager.archiveTaskPrompt(taskId);
 

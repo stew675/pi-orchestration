@@ -3,8 +3,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-import { OrchestrationPlan, TaskType, ALL_TASK_STATUSES } from "../core/types";
-import { OrchestratorState, notifyTui as coreNotifyTui } from "../core";
+import { OrchestrationPlan, OrchestrationState, TaskType, ALL_TASK_STATUSES } from "../core/types";
+import { PlanDatabase } from "../core/plan-database";
+import { OrchestratorState, notifyTui as coreNotifyTui, getPlanDb, setPlanDb, setPlanDbChangeListener } from "../core";
 
 const ORCHESTRATION_BASE = path.join(process.cwd(), CONFIG_DIR_NAME, "orchestration");
 
@@ -81,14 +82,16 @@ export function drainPlanChangeListeners(): void {
     planChangeListeners = [];
 }
 
-let lastSavedPlanJson = "";
 let saveTimer: NodeJS.Timeout | null = null;
 
 export function startPlanSaveTimer(): void {
     if (saveTimer) return;
     saveTimer = setInterval(() => {
         try {
-            PersistenceManager.flushPlan();
+            const planDb = getPlanDb();
+            if (planDb && planDb.isDirty()) {
+                PersistenceManager.flushPlan();
+            }
         } catch (e) {
             coreNotifyTui("PersistenceManager auto-save error: " + String(e));
         }
@@ -104,6 +107,33 @@ export function stopPlanSaveTimer(): void {
         saveTimer = null;
     }
 }
+
+/** @internal Unsubscribe handle for PlanDatabase change listener. */
+let planDbUnsubscribe: (() => void) | null = null;
+
+/** Wire up the auto-save flush to PlanDatabase dirty tracking.
+ *  Called at session start after the database is loaded. */
+export function wirePlanPersistence(): void {
+    // Unsubscribe from any previous connection
+    if (planDbUnsubscribe) {
+        planDbUnsubscribe();
+    }
+    const db = getPlanDb();
+    if (!db) return;
+
+    // Wire PlanDatabase error reporter so listener failures are surfaced via TUI.
+    PlanDatabase.reportError = (msg: string) => coreNotifyTui(msg);
+
+    planDbUnsubscribe = db.onDidChange(() => {
+        // Only fire change notifications (UI updates) — no disk I/O here.
+        // All persistence flows through the debounced timer in startPlanSaveTimer().
+    });
+}
+
+// Register change listener so setPlanDb automatically re-wires persistence
+setPlanDbChangeListener(() => {
+    wirePlanPersistence();
+});
 
 /** Fire UI listeners without invalidating the in-memory cache. Used by savePlan() - we already have the plan in memory, no need to re-read disk. */
 function notifyPlanChange(): void {
@@ -182,6 +212,7 @@ function isValidOrchestrationPlan(obj: unknown): obj is OrchestrationPlan {
     if (typeof plan.goal !== "string") return false;
 
     if (plan.currentTaskId !== undefined && typeof plan.currentTaskId !== "string") return false;
+    if (plan.status !== undefined && typeof plan.status !== "string") return false;
 
     if (!Array.isArray(plan.tasks)) return false;
     for (const item of plan.tasks) {
@@ -292,6 +323,7 @@ function recoverPlan(obj: unknown): OrchestrationPlan | null {
     const repaired: OrchestrationPlan = {
         goal: plan.goal as string,
         currentTaskId: typeof plan.currentTaskId === "string" ? (plan.currentTaskId as string) : undefined,
+        status: typeof plan.status === "string" ? (plan.status as OrchestrationState) : undefined,
         tasks: tasks as unknown as OrchestrationPlan["tasks"]
     };
 
@@ -447,25 +479,19 @@ export class PersistenceManager {
     }
 
     /**
-     * Checks if the OrchestratorState JSON plan has changed, and if so,
-     * takes a snapshot and commits it to disk.
+     * Flush the PlanDatabase state to disk. Only writes if the database
+     * is marked dirty (i.e., mutations occurred since last flush).
      */
     static flushPlan(): void {
-        const plan = OrchestratorState.plan;
-        if (!plan) {
-            lastSavedPlanJson = "";
-            return;
-        }
-
-        const currentJson = JSON.stringify(plan);
-        if (currentJson === lastSavedPlanJson) {
+        const planDb = getPlanDb();
+        if (!planDb || !planDb.isDirty()) {
             return;
         }
 
         try {
             this.initDirs();
-            // Take a snapshot (deep clone) for purposes of safely writing
-            const snapshot = JSON.parse(currentJson) as OrchestrationPlan;
+            // Take a snapshot via toJSON (returns defensive deep copy)
+            const snapshot = planDb.toJSON();
 
             const planPath = getPlanJsonPath();
             safeWriteFile(planPath, JSON.stringify(snapshot, null, 2));
@@ -493,8 +519,12 @@ export class PersistenceManager {
                 }
             }
 
-            this.renderMarkdown(snapshot);
-            lastSavedPlanJson = currentJson;
+            // Markdown rendering uses PlanDatabase.toMarkdown()
+            const md = planDb.toMarkdown(OrchestratorState.currentState);
+            safeWriteFile(getPlanMdPath(), md);
+
+            // Clear dirty flag after successful write
+            planDb.clearDirty();
 
             notifyPlanChange();
         } catch (e) {
@@ -503,13 +533,11 @@ export class PersistenceManager {
     }
 
     /**
-     * Save the plan to `plans/plan.json` atomically (write-to-temp + rename).
-     * Also re-renders `plans/plan.md` and emits a plan-change event.
-     * On first save after migration, cleans up legacy root-level files.
-     * Throws on I/O failure.
+     * Save a plan by replacing the PlanDatabase with one built from the given
+     * OrchestrationPlan object. Also flushes immediately.
      */
     static savePlan(plan: OrchestrationPlan): void {
-        OrchestratorState.plan = plan;
+        setPlanDb(new PlanDatabase(plan));
         this.flushPlan();
     }
 
@@ -517,8 +545,7 @@ export class PersistenceManager {
     static clearPlan(): void {
         cachedImplementationPlan = undefined; // invalidate implementation plan cache
         cachedPlanReview = undefined; // invalidate plan review cache
-        OrchestratorState.plan = null;
-        lastSavedPlanJson = "";
+        setPlanDb(null);
         const unlinkIfExists = (p: string) => {
             if (fs.existsSync(p)) fs.unlinkSync(p);
         };
@@ -550,8 +577,7 @@ export class PersistenceManager {
 
     /** Clear plan.json and plan.md but preserve implementation-plan.md. */
     static clearPlanJsonOnly(): void {
-        OrchestratorState.plan = null;
-        lastSavedPlanJson = "";
+        setPlanDb(null);
         const unlinkIfExists = (p: string) => {
             if (fs.existsSync(p)) fs.unlinkSync(p);
         };
@@ -669,52 +695,12 @@ export class PersistenceManager {
             .replace(/^((?!```).*)$/gm, (line) => line.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
     }
 
-    static renderMarkdown(plan: OrchestrationPlan): void {
-        const md = this.buildMarkdownString(plan);
-        const planMd = getPlanMdPath();
-        safeWriteFile(planMd, md);
-    }
-
-    /** Build the Markdown string for the plan (used synchronously by renderMarkdown). */
-    static buildMarkdownString(plan: OrchestrationPlan): string {
-        const esc = PersistenceManager.escapeMdInline;
-        const lines: string[] = [];
-
-        lines.push(`# Goal: ${esc(plan.goal)}\n`);
-        lines.push("## Status");
-        lines.push(`- **Current Task**: ${plan.currentTaskId || "None"}`);
-        lines.push(`- **Overall Status**: ${OrchestratorState.currentState}\n`);
-
-        lines.push("## Tasks\n");
-
-        for (const task of plan.tasks) {
-            const checkbox = task.status === "completed" ? "[x]" : "[ ]";
-            lines.push(`- ${checkbox} Task (ID: ${task.id}): ${esc(task.description)}`);
-            if (task.files && task.files.length > 0) {
-                lines.push(`    - Files: ${task.files.map((f) => `\`${f}\``).join(", ")}`);
-            }
-            if (task.dependencies && task.dependencies.length > 0) {
-                lines.push(`    - Dependencies: ${task.dependencies.join(", ")}`);
-            }
-            lines.push(`    - Status: ${task.status}`);
-            if (task.complexity) {
-                lines.push(`    - Complexity: ${task.complexity}`);
-            }
-            if (task.result?.summary) {
-                // Summaries contain their own markdown structure - preserve it
-                const safeSummary = PersistenceManager.escapeMdContent(task.result.summary);
-                lines.push(`    - Result:\n\n${safeSummary}`);
-            }
-            if (task.status === "failed" && task.validatorFeedback) {
-                lines.push(`    - Feedback: ${esc(task.validatorFeedback)}`);
-            }
-            if (task.status === "awaiting_clarification" && task.clarificationQuery) {
-                lines.push(`    - Clarification Needed: ${esc(task.clarificationQuery)}`);
-            }
-            lines.push("");
-        }
-
-        return lines.join("\n");
+    /** Render the plan markdown by delegating to PlanDatabase.toMarkdown(). */
+    static renderMarkdown(): void {
+        const planDb = getPlanDb();
+        if (!planDb) return;
+        const md = planDb.toMarkdown(OrchestratorState.currentState);
+        safeWriteFile(getPlanMdPath(), md);
     }
 
     static getMarkdownPlan(): string | null {

@@ -1,7 +1,7 @@
-import { ModelRef } from "./types";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import {
-    OrchestrationPlan,
+    ModelRef,
+    Task,
     DEFAULT_TASK_TIMEOUT_MS,
     DEFAULT_VALIDATOR_TIMEOUT_MS,
     DEFAULT_SUMMARY_TIMEOUT_MS,
@@ -9,8 +9,56 @@ import {
     DEFAULT_SUB_AGENT_MAX_TURNS,
     DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS
 } from "./types";
+import { PlanDatabase } from "./plan-database";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
 import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, isPlanningMode, isExecutingMode, type OrchestrationState } from "./state-machine";
+
+/** External-facing shape of OrchestratorState.
+ * _planDb is internal (access via getPlanDb()/setPlanDb()) but must remain
+ * on the interface so the singleton's getter/setter compile correctly. */
+interface OrchestratorStateExternal {
+    currentState: OrchestrationState;
+    pi: ExtensionAPI | undefined;
+    theme: Theme | null;
+    /** @internal Plan database — use getPlanDb()/setPlanDb() instead. */
+    _planDb: PlanDatabase | null;
+    simpleTaskModel: ModelRef | null;
+    complexTaskModel: ModelRef | null;
+    summaryModel: ModelRef | null;
+    validatorModel: ModelRef | null;
+    orchestrationModel: ModelRef | null;
+    planningModel: ModelRef | null;
+    reviewerModel: ModelRef | null;
+    codeReviewModel: ModelRef | null;
+    summarizationConcurrency: number;
+    parallelTasks: number;
+    allowStopTool: boolean;
+    validateSimpleTasks: boolean;
+    validateComplexTasks: boolean;
+    debugLogTransitions: boolean;
+    taskTimeoutMs: number;
+    validatorTimeoutMs: number;
+    taskSummaryTimeoutMs: number;
+    subAgentIdleTimeoutMs: number;
+    subAgentMaxTurns: number;
+    verifyingOrchestratorMaxTurns: number;
+    originalMainModel: ModelRef | undefined;
+    prePlanningModel: ModelRef | undefined;
+    preReviewModel: ModelRef | undefined;
+    originalSystemPrompt: string | undefined;
+    pendingSystemPromptRestore: boolean;
+    shouldResetContext: boolean;
+    _planJustUpdated: boolean;
+    _planEditedThisTurn: boolean;
+    _preWriteHintSent: boolean;
+    _inReviewPhase: boolean;
+    _incorporatingFeedback: boolean;
+    _pendingReviewStart: boolean;
+    _pendingReviewCompletion: boolean;
+    _verifyingOrchestratorTurnCount: number;
+    _verifyingTurnCounterActive: boolean;
+    shuttingDown: boolean;
+}
 
 /**
  * Central orchestrator state singleton.
@@ -27,7 +75,11 @@ export const OrchestratorState = {
     currentState: "inactive" as OrchestrationState,
     pi: undefined as ExtensionAPI | undefined,
     theme: null as Theme | null,
-    plan: null as OrchestrationPlan | null,
+
+    // --- Plan database (canonical in-memory store) ---
+    _planDb: null as PlanDatabase | null,
+    get planDb(): PlanDatabase | null { return this._planDb; },
+    set planDb(value: PlanDatabase | null) { this._planDb = value; },
 
     // --- Configured Models ---
     simpleTaskModel: null as ModelRef | null,
@@ -95,8 +147,28 @@ export const OrchestratorState = {
     /** Flag to track whether the verifying turn counter is active (prevents stale counts on re-entry). */
     _verifyingTurnCounterActive: false,
     /** Flag to prevent writing stale data to disk while shutting the orchestration mode down */
-    shuttingDown: false
-};
+    shuttingDown: false,
+} as OrchestratorStateExternal;
+
+
+
+let onPlanDbChangedCallback: ((db: PlanDatabase | null) => void) | null = null;
+
+/** Register a listener to be notified when setPlanDb is called (used by persistence layer). */
+export function setPlanDbChangeListener(listener: (db: PlanDatabase | null) => void): void {
+    onPlanDbChangedCallback = listener;
+}
+
+/** Get the plan database directly (transactional access). */
+export function getPlanDb(): PlanDatabase | null {
+    return OrchestratorState._planDb;
+}
+
+/** Set the plan database. Use this to replace the canonical in-memory store. */
+export function setPlanDb(value: PlanDatabase | null): void {
+    OrchestratorState._planDb = value;
+    onPlanDbChangedCallback?.(value);
+}
 
 /**
  * Transition the orchestrator into a specific mode.
@@ -205,7 +277,7 @@ export function requireActive(ctx: {
 const STATE_DEFAULTS = {
     currentState: "inactive" as OrchestrationState,
     theme: null as Theme | null,
-    plan: null as OrchestrationPlan | null,
+    _planDb: null as PlanDatabase | null,
     simpleTaskModel: null as ModelRef | null,
     complexTaskModel: null as ModelRef | null,
     summaryModel: null as ModelRef | null,
@@ -254,7 +326,7 @@ const STATE_DEFAULTS = {
  */
 export function resetState(): void {
     for (const [key, value] of Object.entries(STATE_DEFAULTS)) {
-        (OrchestratorState as Record<string, unknown>)[key] = value;
+        (OrchestratorState as unknown as Record<string, unknown>)[key] = value;
     }
 }
 
@@ -507,34 +579,15 @@ export function formatModel(m: ModelRef | null | undefined): string {
     return `${m.provider}/${m.id}`;
 }
 
-/** Count tasks by status. */
-function countTasksByStatus(): Record<string, number> {
-    const plan = OrchestratorState.plan;
-    const counts: Record<string, number> = {};
-    if (plan) {
-        for (const task of plan.tasks || []) {
-            counts[task.status] = (counts[task.status] || 0) + 1;
-        }
-    }
-    return counts;
-}
-
 /**
  * Recover interrupted tasks: any task in 'running' or 'validating' was mid-execution.
+ * Delegates to PlanDatabase.recoverInterruptedTasks() for atomic mutation.
  * Returns the number of recovered tasks.
  */
 export function recoverInterruptedTasks(): number {
-    const plan = OrchestratorState.plan;
-    if (!plan) return 0;
-    let recovered = 0;
-    for (const task of plan.tasks || []) {
-        if (task.status === "running" || task.status === "validating" || task.status === "summarizing") {
-            task.status = "pending";
-            task.validatorFeedback = undefined;
-            recovered++;
-        }
-    }
-    return recovered;
+    const planDb = getPlanDb();
+    if (!planDb) return 0;
+    return planDb.recoverInterruptedTasks();
 }
 
 /** Granular execution phase labels for the TUI status display. */
@@ -621,9 +674,9 @@ export function truncateToSentence(text: string, maxChars: number = 120): string
  * Build a human-readable status summary for display.
  */
 export function buildStatusSummary(): string {
-    const plan = OrchestratorState.plan;
-    if (!plan) return "No active plan";
-    const counts = countTasksByStatus();
+    const planDb = getPlanDb();
+    if (!planDb) return "No active plan";
+    const counts = planDb.countByStatus();
     const parts: string[] = [];
 
     // Show phase/status indicator with granular label when in execution
@@ -638,8 +691,9 @@ export function buildStatusSummary(): string {
         parts.push(`Orchestration Status: inactive`);
     }
 
-    if (plan.currentTaskId) {
-        const task = (plan.tasks || []).find((t) => t.id === plan.currentTaskId);
+    const currentTaskId = planDb.getCurrentTaskId();
+    if (currentTaskId) {
+        const task = planDb.getTasks().find((t: Task) => t.id === currentTaskId);
         if (task) {
             parts.push(`Current task: ${stripTaskPrefix(task.id)} [${task.status}]`);
         }

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ModelRef, OrchestrationPlan, Task } from "../core/types";
-import { ACTIVE_TASK_STATUSES } from "../core/types";
-import { OrchestratorState } from "../core";
+import type { ModelRef, Task } from "../core/types";
+import { OrchestratorState, getPlanDb } from "../core";
+import type { PlanDatabase } from "../core/plan-database";
 import { PersistenceManager } from "../context/persistence";
 import { notifyOrchestrator, buildFinalReviewMessage, notifyTuiOnly } from "./utils";
 import * as fs from "fs";
@@ -41,8 +41,8 @@ export async function runTasks(
         let taskToRun: Task | undefined;
 
         try {
-            const plan = OrchestratorState.plan;
-            if (!plan) {
+            const planDb = getPlanDb();
+            if (!planDb) {
                 notifyTuiOnly(pi, "Runner: No plan found.");
                 notifyOrchestrator(
                     pi,
@@ -67,37 +67,38 @@ export async function runTasks(
             const countingAsyncSummaries = OrchestratorState.summarizationConcurrency >= 1;
 
             // Enforce parallel implementation tasks limit.
-            const activeImplementationTasks = countActiveImplementationTasks(plan, countingAsyncSummaries);
+            const activeImplementationTasks = planDb.getActiveImplementationTasks(countingAsyncSummaries);
             if (activeImplementationTasks.length >= OrchestratorState.parallelTasks) {
                 return;
             }
 
             // Find all pending tasks whose dependencies are completed
-            const readyTasks = findReadyTasks(plan);
+            const readyTaskIds = planDb.findReadyTasks();
+            const readyTasks: Task[] = readyTaskIds.map(id => planDb.getTask(id)!).filter(Boolean);
 
             if (readyTasks.length > 1) {
                 // Sort tasks descending by their transitive dependent count to prioritize bottlenecks (critical path)
                 readyTasks.sort((a, b) => {
-                    const countA = getTransitiveDependentCount(plan, a.id);
-                    const countB = getTransitiveDependentCount(plan, b.id);
+                    const countA = getTransitiveDependentCount(planDb, a.id);
+                    const countB = getTransitiveDependentCount(planDb, b.id);
                     return countB - countA;
                 });
             }
 
             if (readyTasks.length === 0) {
-                const active = countActiveImplementationTasks(plan, countingAsyncSummaries);
+                const active = planDb.getActiveImplementationTasks(countingAsyncSummaries);
                 if (active.length > 0) {
                     return; // Someone is already executing or waiting
                 }
 
                 if (countingAsyncSummaries) {
-                    const summarizingTasks = (plan.tasks || []).filter((t) => t.status === "summarizing");
+                    const summarizingTasks = planDb.getTasks().filter((t) => t.status === "summarizing");
                     if (summarizingTasks.length > 0) {
                         return; // Async summaries in-flight
                     }
                 }
 
-                const failedTasks = (plan.tasks || []).filter((t) => t.status === "failed");
+                const failedTasks = planDb.getTasks().filter((t) => t.status === "failed");
                 if (failedTasks.length > 0) {
                     // Transition to paused state
                     if (!transitionTo("paused")) {
@@ -121,8 +122,8 @@ export async function runTasks(
                     return;
                 }
 
-                const allCompleted = (plan.tasks || []).every((t) => t.status === "completed");
-                if (!allCompleted) {
+                const allDone = planDb.allCompleted();
+                if (!allDone) {
                     // Transition to paused state
                     if (!transitionTo("paused")) {
                         notifyTuiOnly(pi, "Failed to transition to paused state due to stalled execution");
@@ -186,11 +187,11 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
     const { awaitAllSummaries } = await import("./summarizer");
     await awaitAllSummaries();
 
-    const finalPlan = OrchestratorState.plan;
-    if (!finalPlan) return;
+    const planDb = getPlanDb();
+    if (!planDb) return;
 
     // All tasks completed - enter final review (must wake orchestrator)
-    if (finalPlan.tasks.every((t) => t.status === "completed")) {
+    if (planDb.allCompleted()) {
         const codeReviewModel = OrchestratorState.codeReviewModel;
         if (codeReviewModel) {
             if (!transitionTo("code_review")) {
@@ -245,30 +246,21 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 }
             }
 
-            const updatedPlan = OrchestratorState.plan;
-            if (!updatedPlan) return;
+            const planDb = getPlanDb();
+            if (!planDb) return;
 
             if (approved) {
                 notifyTuiOnly(pi, "System: Code review APPROVED — entering FINAL REVIEW.");
-                if (!updatedPlan.attributes) updatedPlan.attributes = [];
-                updatedPlan.attributes = updatedPlan.attributes.filter(a => a !== "CODE_REVIEW_REJECTED");
-                if (!updatedPlan.attributes.includes("CODE_REVIEW_APPROVED")) {
-                    updatedPlan.attributes.push("CODE_REVIEW_APPROVED");
-                }
                 // Code review passed — proceed to final verification
                 if (!transitionTo("verifying")) {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
                 refreshUiStatus();
+                const updatedPlan = planDb.toJSON();
                 const reviewMessage = buildFinalReviewMessage(updatedPlan, "System: Code review APPROVED. Entering FINAL REVIEW.");
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             } else if (rejected) {
                 notifyTuiOnly(pi, "System: Code review REJECTED — changes needed.");
-                if (!updatedPlan.attributes) updatedPlan.attributes = [];
-                updatedPlan.attributes = updatedPlan.attributes.filter(a => a !== "CODE_REVIEW_APPROVED");
-                if (!updatedPlan.attributes.includes("CODE_REVIEW_REJECTED")) {
-                    updatedPlan.attributes.push("CODE_REVIEW_REJECTED");
-                }
                 // Code review rejected — remain in code_review and wake orchestrator for remediation
                 if (!transitionTo("code_review")) {
                     notifyTuiOnly(pi, "Failed to transition to code_review state");
@@ -293,6 +285,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                     notifyTuiOnly(pi, "Failed to transition to verifying state");
                 }
                 refreshUiStatus();
+                const updatedPlan = planDb.toJSON();
                 const reviewMessage = buildFinalReviewMessage(updatedPlan);
                 notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
             }
@@ -304,7 +297,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
 
             // Build a contextual wakeup message with task summaries so the orchestrator
             // has everything it needs to decide - no need for redundant verification tasks.
-            const reviewMessage = buildFinalReviewMessage(finalPlan);
+            const reviewMessage = buildFinalReviewMessage(planDb.toJSON());
             notifyOrchestrator(pi, reviewMessage, { tuiVisible: false });
         }
     }
@@ -314,32 +307,12 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
 // Scheduling helpers
 // ---------------------------------------------------------------------------
 
-/** Count active implementation tasks (excluding summarizing when async summaries are enabled). */
-function countActiveImplementationTasks(plan: OrchestrationPlan, countingAsyncSummaries: boolean): Task[] {
-    return (plan.tasks || []).filter((t: Task) => {
-        if (!ACTIVE_TASK_STATUSES.includes(t.status as any)) return false;
-        if (countingAsyncSummaries && t.status === "summarizing") return false;
-        return true;
-    });
-}
-
-/** Find all pending tasks whose dependencies are completed. */
-function findReadyTasks(plan: OrchestrationPlan): Task[] {
-    return (plan.tasks || []).filter((t) => {
-        if (t.status !== "pending") return false;
-        const deps = t.dependencies || [];
-        return deps.every((depId) => {
-            const depTask = plan.tasks.find((x) => x.id === depId);
-            return depTask && depTask.status === "completed";
-        });
-    });
-}
-
 /** Count transitive dependents of a task using DFS to determine bottleneck priorities. */
-function getTransitiveDependentCount(plan: OrchestrationPlan, taskId: string): number {
+function getTransitiveDependentCount(planDb: PlanDatabase, taskId: string): number {
     const visited = new Set<string>();
+    const tasks = planDb.getTasks();
     function dfs(currentId: string) {
-        for (const t of plan.tasks || []) {
+        for (const t of tasks) {
             if (t.dependencies?.includes(currentId) && !visited.has(t.id)) {
                 visited.add(t.id);
                 dfs(t.id);

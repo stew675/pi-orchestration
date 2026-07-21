@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Task } from "../core/types";
 import { MAX_CLARIFICATIONS } from "../core/types";
 import { PersistenceManager } from "../context/persistence";
-import { OrchestratorState } from "../core";
+import { OrchestratorState, getPlanDb } from "../core";
 import { notifyOrchestrator, notifyTuiOnly } from "./utils";
 import { transitionTo } from "../core/state-machine";
 import { refreshUiStatus } from "../ui/ui";
@@ -67,10 +67,10 @@ function archiveTask(task: Task): void {
  */
 export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
     try {
-        const postPlan = OrchestratorState.plan;
-        if (!postPlan) return false;
+        const planDb = getPlanDb();
+        if (!planDb) return false;
 
-        const postTask = postPlan.tasks.find((t) => t.id === task.id);
+        const postTask = planDb.getTask(task.id);
 
         // Archive the result and move prompt to archive for debugging,
         // but skip if it's still summarizing (handled in finalizeTaskSummary).
