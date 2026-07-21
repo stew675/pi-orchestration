@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { PersistenceManager } from "../context/persistence";
 import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
-import { OrchestratorState, PlanDatabase, NOT_ACTIVE_MSG } from "../core";
+import { OrchestratorState, PlanDatabase, NOT_ACTIVE_MSG, getPi } from "../core";
 import { isActive as stateIsActive, isExecutingMode } from "../core/state-machine";
 import { detectFileConflicts, formatFileConflictError } from "../validation/validation";
 import type { Task } from "../core/types";
@@ -142,10 +142,10 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
             planDb.transaction((tx) => { tx.setCurrentTaskId(task.id); });
 
-            Runner.runTasks(OrchestratorState.getPi()).catch((err) => {
+            Runner.runTasks(getPi()).catch((err) => {
                 notifyTuiOnly(pi, "Runner error: " + String(err));
                 notifyOrchestrator(
-                    OrchestratorState.getPi(),
+                    getPi(),
                     `System: Task execution failed to start: ${err instanceof Error ? err.message : String(err)}.`
                 );
             });
@@ -270,13 +270,13 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             // Re-run tasks, passing the clarification data
-            Runner.runTasks(OrchestratorState.getPi(), undefined, {
+            Runner.runTasks(getPi(), undefined, {
                 taskId: params.taskId,
                 answer: params.answer
             }).catch((err) => {
                 notifyTuiOnly(pi, "Runner error on resume: " + String(err));
                 notifyOrchestrator(
-                    OrchestratorState.getPi(),
+                    getPi(),
                     `System: Failed to resume task '${params.taskId}': ${err instanceof Error ? err.message : String(err)}.`
                 );
             });
