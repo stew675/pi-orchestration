@@ -113,7 +113,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                             complexity: params.complexity as "simple" | "complex",
                             taskType: (params.taskType as TaskType) || undefined,
                             timeoutMs: effectiveTimeout
-                        });
+                        }, params.replacesTaskId);
 
                         if (params.replacesTaskId) {
                             tx.deleteTask(params.replacesTaskId, true, [params.id]); // healDependencies=true, replacementTaskIds=[params.id]
@@ -141,7 +141,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                             complexity: params.complexity as "simple" | "complex",
                             taskType: (params.taskType as TaskType) || undefined,
                             timeoutMs: effectiveTimeout
-                        });
+                        }, params.replacesTaskId);
 
                         if (params.replacesTaskId) {
                             tx.deleteTask(params.replacesTaskId, true, [params.id]); // healDependencies=true, replacementTaskIds=[params.id]
@@ -473,7 +473,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                                 complexity: (update.complexity as "simple" | "complex") || "complex",
                                 taskType: (update.taskType as TaskType) || "other",
                                 timeoutMs: clampTaskTimeout(update.timeoutMs)
-                            });
+                            }, update.replacesTaskId);
 
                             if (update.replacesTaskId) {
                                 const list = replacements.get(update.replacesTaskId) || [];

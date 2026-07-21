@@ -269,6 +269,81 @@ describe("dependency healing on delete", () => {
         expect(taskB!.dependencies).toEqual(["task_phase2_a_replacement"]);
     });
 
+    it("ensures dependants wait for replacement tasks when splitting a task sequentially", () => {
+        // Setup: A -> B -> C
+        const testDb = new PlanDatabase(makePlan([
+            { id: "task_phase1_a", status: "completed" },
+            { id: "task_phase2_b", status: "failed", dependencies: ["task_phase1_a"] },
+            { id: "task_phase3_c", status: "pending", dependencies: ["task_phase2_b"] },
+        ]));
+
+        // Split B into B1 and B2
+        testDb.transaction((tx) => {
+            tx.addTask({ id: "task_phase2_b1", description: "B1", dependencies: ["task_phase1_a"] }, "task_phase2_b");
+            tx.deleteTask("task_phase2_b", true, ["task_phase2_b1"]);
+        });
+
+        testDb.transaction((tx) => {
+            tx.addTask({ id: "task_phase2_b2", description: "B2", dependencies: ["task_phase2_b1"] }, "task_phase2_b");
+        });
+
+        const taskB1 = testDb.getTask("task_phase2_b1");
+        const taskB2 = testDb.getTask("task_phase2_b2");
+        const taskC = testDb.getTask("task_phase3_c");
+
+        expect(taskB1).toBeDefined();
+        expect(taskB2).toBeDefined();
+        expect(taskC).toBeDefined();
+
+        // C should depend on B2 (or B1/B2) and NOT be ready until B1 and B2 are done
+        expect(taskC!.dependencies).toContain("task_phase2_b2");
+
+        // Order check: B1 < B2 < C
+        const taskIds = testDb.getAllTaskIds();
+        expect(taskIds.indexOf("task_phase2_b1")).toBeLessThan(taskIds.indexOf("task_phase2_b2"));
+        expect(taskIds.indexOf("task_phase2_b2")).toBeLessThan(taskIds.indexOf("task_phase3_c"));
+
+        // Ready tasks check: only B1 is ready, C is NOT ready
+        expect(testDb.findReadyTasks()).toEqual(["task_phase2_b1"]);
+    });
+
+    it("ensures dependants wait for newly added tasks when deleting a task first then adding replacement", () => {
+        // Setup: A -> B -> C (all touching src/foo.ts)
+        const testDb = new PlanDatabase(makePlan([
+            { id: "task_phase1_a", status: "completed", files: ["src/foo.ts"] },
+            { id: "task_phase2_b", status: "failed", files: ["src/foo.ts"], dependencies: ["task_phase1_a"] },
+            { id: "task_phase3_c", status: "pending", files: ["src/foo.ts"], dependencies: ["task_phase2_b"] },
+        ]));
+
+        // Delete B first
+        testDb.transaction((tx) => {
+            tx.deleteTask("task_phase2_b", true);
+        });
+
+        // Add B1 (replacement)
+        testDb.transaction((tx) => {
+            tx.addTask({
+                id: "task_phase2_b1",
+                description: "Replacement B1",
+                files: ["src/foo.ts"],
+                dependencies: ["task_phase1_a"],
+            });
+        });
+
+        const taskC = testDb.getTask("task_phase3_c");
+        const taskB1 = testDb.getTask("task_phase2_b1");
+
+        expect(taskB1).toBeDefined();
+        expect(taskC).toBeDefined();
+
+        // C must depend on B1 and NOT run ahead of B1
+        expect(taskC!.dependencies).toContain("task_phase2_b1");
+
+        const taskIds = testDb.getAllTaskIds();
+        expect(taskIds.indexOf("task_phase2_b1")).toBeLessThan(taskIds.indexOf("task_phase3_c"));
+        expect(testDb.findReadyTasks()).toEqual(["task_phase2_b1"]);
+    });
+
     it("rejects a delete without healing when dangling deps remain", () => {
         // When healDependencies=false, dependents still reference the deleted task.
         // The validation pipeline catches the dangling dependency and rolls back.

@@ -27,6 +27,11 @@ export class PlanTransaction {
     private _tasks: Map<string, Task>;
     private _taskOrder: string[];
     private _attributes: Set<string>;
+    private _replacementMap: Map<string, string[]> = new Map();
+    private _deletedTaskInfo: Map<
+        string,
+        { originalIndex: number; formerDependants: string[]; parentDeps: string[]; files: string[] }
+    > = new Map();
 
     // Visible to PlanDatabase.commit() only (same module)
 
@@ -35,7 +40,12 @@ export class PlanTransaction {
         currentTaskId: string | undefined,
         tasks: Map<string, Task>,
         taskOrder: string[],
-        attributes: Set<string>
+        attributes: Set<string>,
+        replacementMap?: Map<string, string[]>,
+        deletedTaskInfo?: Map<
+            string,
+            { originalIndex: number; formerDependants: string[]; parentDeps: string[]; files: string[] }
+        >
     ) {
         this._goal = goal;
         this._currentTaskId = currentTaskId;
@@ -48,6 +58,8 @@ export class PlanTransaction {
         this._tasks = clonedTasks;
         this._taskOrder = [...taskOrder];
         this._attributes = new Set(attributes);
+        this._replacementMap = replacementMap ? new Map(replacementMap) : new Map();
+        this._deletedTaskInfo = deletedTaskInfo ? new Map(deletedTaskInfo) : new Map();
     }
 
     // ------------------------------------------------------------------
@@ -62,9 +74,10 @@ export class PlanTransaction {
         this._currentTaskId = id;
     }
 
-    /** Add a new task. Appends to end of order. */
+    /** Add a new task. Smart positions task in array order and re-wires dependants if replacing or preceding tasks. */
     addTask(
-        task: Omit<Task, "status" | "attempts"> & { status?: Task["status"]; attempts?: number }
+        task: Omit<Task, "status" | "attempts"> & { status?: Task["status"]; attempts?: number },
+        replacesTaskId?: string
     ): void {
         if (this._tasks.has(task.id)) {
             throw new Error(`Task '${task.id}' already exists`);
@@ -90,7 +103,106 @@ export class PlanTransaction {
         };
 
         this._tasks.set(newTask.id, newTask);
-        this._taskOrder.push(newTask.id);
+
+        // Smart positioning in _taskOrder
+        let insertIdx = -1;
+
+        if (replacesTaskId) {
+            // Case 1: replacesTaskId is currently in _taskOrder
+            const targetIdx = this._taskOrder.indexOf(replacesTaskId);
+            if (targetIdx !== -1) {
+                insertIdx = targetIdx;
+            } else {
+                // Case 2: replacesTaskId was deleted earlier in transaction/sequence
+                const prevReplacements = this._replacementMap.get(replacesTaskId) || [];
+                if (prevReplacements.length > 0) {
+                    const lastRepId = prevReplacements[prevReplacements.length - 1];
+                    const lastRepIdx = this._taskOrder.indexOf(lastRepId);
+                    if (lastRepIdx !== -1) {
+                        insertIdx = lastRepIdx + 1;
+                    }
+                }
+                if (insertIdx === -1 && this._deletedTaskInfo.has(replacesTaskId)) {
+                    const info = this._deletedTaskInfo.get(replacesTaskId)!;
+                    insertIdx = Math.min(info.originalIndex, this._taskOrder.length);
+                }
+            }
+        }
+
+        if (insertIdx === -1) {
+            // Case 3A: Check if any existing pending task was a former dependant of a deleted task
+            let formerDepIdx = -1;
+            for (let i = 0; i < this._taskOrder.length; i++) {
+                const existId = this._taskOrder[i];
+                const existTask = this._tasks.get(existId);
+                if (!existTask || existTask.status === "completed") continue;
+
+                for (const info of this._deletedTaskInfo.values()) {
+                    if (info.formerDependants.includes(existId)) {
+                        formerDepIdx = i;
+                        break;
+                    }
+                }
+                if (formerDepIdx !== -1) break;
+            }
+
+            if (formerDepIdx !== -1) {
+                // Insert BEFORE the former dependant so newTask executes first
+                insertIdx = formerDepIdx;
+            } else {
+                // Case 3B: Find the LAST existing task that newTask depends on or shares files with
+                let lastMatchIdx = -1;
+                for (let i = 0; i < this._taskOrder.length; i++) {
+                    const existId = this._taskOrder[i];
+                    const existTask = this._tasks.get(existId);
+                    if (!existTask) continue;
+
+                    const isDep = newTask.dependencies.includes(existId);
+                    const sharesFiles = (newTask.files || []).some((f) => (existTask.files || []).includes(f));
+
+                    if (isDep || sharesFiles) {
+                        lastMatchIdx = i;
+                    }
+                }
+                if (lastMatchIdx !== -1) {
+                    insertIdx = lastMatchIdx + 1;
+                }
+            }
+        }
+
+        if (insertIdx !== -1 && insertIdx >= 0 && insertIdx <= this._taskOrder.length) {
+            this._taskOrder.splice(insertIdx, 0, newTask.id);
+        } else {
+            this._taskOrder.push(newTask.id);
+        }
+
+        // Re-wire former dependants of deleted/replaced tasks ONLY when replacesTaskId is provided
+        if (replacesTaskId) {
+            const info = this._deletedTaskInfo.get(replacesTaskId);
+            const prevReps = this._replacementMap.get(replacesTaskId) || [];
+            if (!prevReps.includes(newTask.id)) {
+                this._replacementMap.set(replacesTaskId, [...prevReps, newTask.id]);
+            }
+
+            if (info) {
+                for (const dependantId of info.formerDependants) {
+                    const depTask = this._tasks.get(dependantId);
+                    if (!depTask || depTask.id === newTask.id) continue;
+
+                    const currentDeps = depTask.dependencies || [];
+                    const newDeps = currentDeps.filter((dId) => !info.parentDeps.includes(dId) || info.parentDeps.length === 0);
+
+                    if (newTask.dependencies.some((d) => prevReps.includes(d))) {
+                        // newTask depends on a previous replacement step (sequential split)
+                        const filtered = newDeps.filter((dId) => !prevReps.includes(dId));
+                        depTask.dependencies = Array.from(new Set([...filtered, newTask.id]));
+                    } else if (!newDeps.includes(newTask.id)) {
+                        // Parallel replacement or first replacement step
+                        depTask.dependencies = Array.from(new Set([...newDeps, newTask.id]));
+                    }
+                }
+            }
+        }
     }
 
     /** Update a single task by merging partial fields into the existing task. */
@@ -131,6 +243,26 @@ export class PlanTransaction {
     deleteTask(id: string, healDependencies?: boolean, replacementTaskIds: string[] = []): void {
         const existing = this._tasks.get(id);
         if (!existing) return; // silent no-op for missing tasks
+
+        const origIdx = this._taskOrder.indexOf(id);
+        const formerDependants: string[] = [];
+        for (const [tId, t] of this._tasks) {
+            if (tId !== id && t.dependencies?.includes(id)) {
+                formerDependants.push(tId);
+            }
+        }
+
+        this._deletedTaskInfo.set(id, {
+            originalIndex: origIdx !== -1 ? origIdx : 0,
+            formerDependants,
+            parentDeps: [...(existing.dependencies || [])],
+            files: [...(existing.files || [])],
+        });
+
+        if (replacementTaskIds.length > 0) {
+            const existingReps = this._replacementMap.get(id) || [];
+            this._replacementMap.set(id, Array.from(new Set([...existingReps, ...replacementTaskIds])));
+        }
 
         if (healDependencies) {
             // Delegate to shared healing logic (same algorithm as in validation.ts)
@@ -199,6 +331,11 @@ export class PlanTransaction {
         tasks: Map<string, Task>;
         taskOrder: string[];
         attributes: Set<string>;
+        replacementMap: Map<string, string[]>;
+        deletedTaskInfo: Map<
+            string,
+            { originalIndex: number; formerDependants: string[]; parentDeps: string[]; files: string[] }
+        >;
     } {
         return {
             goal: this._goal,
@@ -206,6 +343,8 @@ export class PlanTransaction {
             tasks: new Map(this._tasks),
             taskOrder: [...this._taskOrder],
             attributes: new Set(this._attributes),
+            replacementMap: new Map(this._replacementMap),
+            deletedTaskInfo: new Map(this._deletedTaskInfo),
         };
     }
 }
@@ -220,6 +359,11 @@ export class PlanDatabase {
     private _tasks: Map<string, Task>;
     private _taskOrder: string[];
     private _attributes: Set<string>;
+    private _replacementMap: Map<string, string[]> = new Map();
+    private _deletedTaskInfo: Map<
+        string,
+        { originalIndex: number; formerDependants: string[]; parentDeps: string[]; files: string[] }
+    > = new Map();
     private _isDirty: boolean = false;
     private _listeners: Array<() => void> = [];
 
@@ -399,7 +543,9 @@ export class PlanDatabase {
             snapshot.currentTaskId,
             new Map(snapshot.tasks),
             [...snapshot.taskOrder],
-            new Set(snapshot.attributes)
+            new Set(snapshot.attributes),
+            new Map(snapshot.replacementMap),
+            new Map(snapshot.deletedTaskInfo)
         );
 
         // Execute callback — may throw to abort.
@@ -415,6 +561,8 @@ export class PlanDatabase {
         this._tasks = new Map(committed.tasks);
         this._taskOrder = [...committed.taskOrder];
         this._attributes = new Set(committed.attributes);
+        this._replacementMap = new Map(committed.replacementMap);
+        this._deletedTaskInfo = new Map(committed.deletedTaskInfo);
         this._isDirty = true;
 
         // Notify listeners of change.
@@ -590,6 +738,11 @@ export class PlanDatabase {
         tasks: Map<string, Task>;
         taskOrder: string[];
         attributes: Set<string>;
+        replacementMap: Map<string, string[]>;
+        deletedTaskInfo: Map<
+            string,
+            { originalIndex: number; formerDependants: string[]; parentDeps: string[]; files: string[] }
+        >;
     } {
         return {
             goal: this._goal,
@@ -597,6 +750,8 @@ export class PlanDatabase {
             tasks: new Map(this._tasks),
             taskOrder: [...this._taskOrder],
             attributes: new Set(this._attributes),
+            replacementMap: new Map(this._replacementMap),
+            deletedTaskInfo: new Map(this._deletedTaskInfo),
         };
     }
 }
