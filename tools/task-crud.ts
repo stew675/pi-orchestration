@@ -97,7 +97,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                 );
             }
 
-            let plan = StateManager.loadPlan();
+            let plan = OrchestratorState.plan;
 
             const effectiveTimeout = clampTaskTimeout(params.timeoutMs);
 
@@ -253,7 +253,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             try {
@@ -309,7 +309,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             const task = plan.tasks.find((t) => t.id === params.taskId);
@@ -378,7 +378,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             const task = plan.tasks.find((t) => t.id === params.taskId);
@@ -479,7 +479,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             requireTaskCrudPrereqs();
-            let plan = StateManager.loadPlan();
+            let plan = OrchestratorState.plan;
             if (!plan) throw new Error("No active plan found to bulk update.");
 
             const simulatedTasks = JSON.parse(JSON.stringify(plan.tasks)) as Task[];

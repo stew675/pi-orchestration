@@ -1,7 +1,7 @@
 import type { ModelRef, Task } from "../core/types";
 import { READ_ONLY_TOOLS } from "../core/types";
-import { OrchestratorState, getPi } from "../core";
 import { StateManager } from "../context/state-manager";
+import { OrchestratorState, getPi } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
 import { savePlanSafely, notifyTuiOnly } from "./utils";
 import { formatTimeout } from "../settings/time-utils";
@@ -69,7 +69,7 @@ function resetSummarySemaphore(): void {
 export async function completeTaskWithSummary(task: Task, model?: ModelRef, sessionTranscript?: string): Promise<void> {
     if (OrchestratorState.shuttingDown) return;
 
-    const p = StateManager.loadPlan();
+    const p = OrchestratorState.plan;
     if (!p) return;
 
     const planTask = p.tasks.find((x) => x.id === task.id);
@@ -188,7 +188,7 @@ function resumeRunnerAfterSummary(): void {
 
 /** Apply the summary result to the task in plan.json. */
 function finalizeTaskSummary(taskId: string, result: { summary?: string; error?: string } | null): void {
-    const p = StateManager.loadPlan();
+    const p = OrchestratorState.plan;
     if (!p) {
         notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Plan not found - cannot finalize summary. Task will remain in its current state until the next recovery cycle.`);
         return;

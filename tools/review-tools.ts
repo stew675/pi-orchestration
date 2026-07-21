@@ -29,7 +29,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
         executionMode: "sequential",
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             if (OrchestratorState.currentState === "code_review") {
@@ -84,7 +84,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
         parameters: Type.Object({}),
         async execute() {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             if (OrchestratorState.currentState !== "code_review") {

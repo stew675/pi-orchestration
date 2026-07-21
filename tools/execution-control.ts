@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { StateManager } from "../context/state-manager";
 import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
@@ -31,7 +30,7 @@ export function registerExecutionControlTools(pi: ExtensionAPI) {
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
             const completedTaskIds = new Set(
@@ -99,7 +98,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 );
             }
 
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             // Signal that sub-agent execution has begun - loop detection can now activate.
@@ -171,7 +170,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         parameters: Type.Object({}),
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) return { content: [{ type: "text", text: "No plan exists." }], details: {} };
 
             // Return a concise summary - not the full markdown plan
@@ -203,7 +202,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             requireExecutionMode();
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             if (!transitionTo("replanning")) {
@@ -241,7 +240,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
                 );
             }
 
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) throw new Error("No plan exists.");
 
             const task = plan.tasks.find((t) => t.id === params.taskId);
@@ -331,7 +330,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
 
             killAllProcesses("SIGKILL");
 
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (plan) {
                 if (!transitionTo("stopped")) {
                     notifyTuiOnly(pi, "Failed to transition to stopped state on stop");

@@ -67,7 +67,7 @@ function archiveTask(task: Task): void {
  */
 export function processTaskResult(task: Task, pi?: ExtensionAPI): boolean {
     try {
-        const postPlan = StateManager.loadPlan();
+        const postPlan = OrchestratorState.plan;
         if (!postPlan) return false;
 
         const postTask = postPlan.tasks.find((t) => t.id === task.id);

@@ -204,7 +204,7 @@ function handleResumeFailed(pi: ExtensionAPI) {
  * safe and idempotent.
  */
 function resumePlanExecution(pi: ExtensionAPI) {
-    const plan = OrchestratorState.plan || StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (!plan) return;
 
     killAllProcesses("SIGKILL");
@@ -379,7 +379,7 @@ export function registerEnableCommand(pi: ExtensionAPI) {
             if (!ok) return;
 
             // Check for existing incomplete plan
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed") {
                 await handleResumeExistingPlan(plan, pi, ctx);
                 return;
@@ -465,7 +465,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     const planPayload =
         implPlan && implPlan.trim() ? `\n\n--- Approved Implementation Plan ---\n${implPlan}\n--- End of Plan ---` : "";
 
-    const plan = StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (plan && inferStateFromTasks(plan.tasks, plan.attributes) !== "completed" && plan.tasks.length > 0) {
         if (!plan.attributes) plan.attributes = [];
         if (!plan.attributes.includes("PLAN_APPROVED")) plan.attributes.push("PLAN_APPROVED");
@@ -612,8 +612,8 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
                 return;
             }
 
-            // Check for existing plan on disk
-            const existingPlan = StateManager.loadPlan();
+            // Check for existing plan
+            const existingPlan = OrchestratorState.plan;
             if (existingPlan) {
                 const choice = await ctx.ui.confirm(
                     "Resume editing existing plan?",
@@ -689,7 +689,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Resume orchestration from the last known state (after crash or pause)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) {
                 ctx.ui.notify("No orchestration plan found. Describe a goal or plan with the agent.", "warning");
                 return;
@@ -728,7 +728,7 @@ export function registerOrchestrationCommands(pi: ExtensionAPI) {
         description: "Immediately stop all running sub-agents (can be resumed later)",
         handler: async (_args, ctx) => {
             if (!requireActive(ctx)) return;
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) {
                 ctx.ui.notify("No active orchestration plan.", "warning");
                 return;

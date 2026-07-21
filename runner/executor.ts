@@ -33,15 +33,15 @@ export async function executeTask(
 
         // When resuming after clarification, check status
         if (clarificationData && clarificationData.taskId !== task.id) {
-            const refreshedPlan = StateManager.loadPlan();
+            const refreshedPlan = OrchestratorState.plan;
             if (refreshedPlan) {
                 const refreshedTask = refreshedPlan.tasks.find((t) => t.id === task.id);
                 if (refreshedTask && refreshedTask.status === "completed") return true;
             }
         }
 
-        // Refresh plan state in case user paused/stopped
-        const currentPlan = StateManager.loadPlan();
+        // Use canonical in-memory plan
+        const currentPlan = OrchestratorState.plan;
         if (!currentPlan) return false;
 
         const currentState = getCurrentOrchestrationState();
@@ -83,7 +83,7 @@ export async function executeTask(
 
         // Reset orphaned task status so scheduler can retry on next cycle.
         try {
-            const p = StateManager.loadPlan();
+            const p = OrchestratorState.plan;
             if (p) {
                 const t = p.tasks.find((x) => x.id === task.id);
                 if (t && t.status === "running") {
@@ -130,12 +130,12 @@ function handleClarification(task: Task, clarificationFile: string): boolean {
             task.clarificationQuery = cData.query;
         }
 
-        const p = StateManager.loadPlan();
+        const p = OrchestratorState.plan;
         if (p) savePlanSafely(p);
     } catch (e) {
         task.status = "failed";
         task.validatorFeedback = `Sub-agent attempted to write clarification but the file was invalid/malformed: ${(e as Error).message}`;
-        const p = StateManager.loadPlan();
+        const p = OrchestratorState.plan;
         if (p) savePlanSafely(p);
     }
 
@@ -144,8 +144,8 @@ function handleClarification(task: Task, clarificationFile: string): boolean {
 
 /** Handle successful (code 0) sub-agent exit. Routes through validation and summarization. */
 async function handleSuccessfulExit(task: Task, procResult: SubAgentResult, model?: ModelRef): Promise<void> {
-    // Load fresh plan state - always work from the plan's copy of the task
-    const p = StateManager.loadPlan();
+    // Work from the canonical in-memory plan
+    const p = OrchestratorState.plan;
     if (!p) return;
     const t = p.tasks.find((x) => x.id === task.id);
     if (!t) return;
@@ -233,7 +233,7 @@ async function runTaskSubAgent(
     clarificationData?: { taskId: string; answer: string },
     _pi?: ExtensionAPI
 ): Promise<void> {
-    const plan = StateManager.loadPlan();
+    const plan = OrchestratorState.plan;
     if (!plan) return;
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-orch-"));
@@ -267,7 +267,7 @@ async function runTaskSubAgent(
             return;
         }
 
-        const p = StateManager.loadPlan();
+        const p = OrchestratorState.plan;
         if (!p) return;
 
         const t = p.tasks.find((x) => x.id === task.id);

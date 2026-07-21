@@ -82,7 +82,7 @@ export default function (pi: ExtensionAPI) {
 
                 // --- Orchestrator stall detection ---
                 // Watchdog: Kick the orchestrator if it stalls during execution mode.
-                const plan = StateManager.loadPlan();
+                const plan = OrchestratorState.plan;
                 if (
                     !isExecutingMode(OrchestratorState.currentState) ||
                     ["paused", "stopped", "pausing"].includes(OrchestratorState.currentState) ||
@@ -363,19 +363,16 @@ export default function (pi: ExtensionAPI) {
                 );
 
                 // Force transition to completed and notify user.
-                const plan = StateManager.loadPlan();
+                const plan = OrchestratorState.plan;
                 if (plan) {
                     try {
                         import("./core/state-machine").then(({ transitionTo }) => {
                             transitionTo("completed");
-                            const updatedPlan = StateManager.loadPlan();
-                            if (updatedPlan) {
-                                if (!updatedPlan.attributes) updatedPlan.attributes = [];
-                                if (!updatedPlan.attributes.includes("VERIFIED")) {
-                                    updatedPlan.attributes.push("VERIFIED");
-                                }
-                                StateManager.savePlan(updatedPlan);
+                            plan.attributes = plan.attributes || [];
+                            if (!plan.attributes.includes("VERIFIED")) {
+                                plan.attributes.push("VERIFIED");
                             }
+                            StateManager.savePlan(plan);
                         });
                     } catch (e) {
                         notifyTuiOnly(pi, "Failed during force-approve: " + String(e));

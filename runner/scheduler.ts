@@ -41,7 +41,7 @@ export async function runTasks(
         let taskToRun: Task | undefined;
 
         try {
-            const plan = StateManager.loadPlan();
+            const plan = OrchestratorState.plan;
             if (!plan) {
                 notifyTuiOnly(pi, "Runner: No plan found.");
                 notifyOrchestrator(
@@ -188,7 +188,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
     const { awaitAllSummaries } = await import("./summarizer");
     await awaitAllSummaries();
 
-    const finalPlan = StateManager.loadPlan();
+    const finalPlan = OrchestratorState.plan;
     if (!finalPlan) return;
 
     // All tasks completed - enter final review (must wake orchestrator)
@@ -248,7 +248,7 @@ async function finishPlan(pi: ExtensionAPI, _model?: ModelRef): Promise<void> {
                 }
             }
 
-            const updatedPlan = StateManager.loadPlan();
+            const updatedPlan = OrchestratorState.plan;
             if (!updatedPlan) return;
 
             if (approved) {
