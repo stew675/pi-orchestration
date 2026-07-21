@@ -1,5 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { PersistenceManager, drainPlanChangeListeners, startPlanSaveTimer, stopPlanSaveTimer, wirePlanPersistence } from "./context/persistence";
+import {
+    PersistenceManager,
+    drainPlanChangeListeners,
+    startPlanSaveTimer,
+    stopPlanSaveTimer,
+    wirePlanPersistence
+} from "./context/persistence";
 import { Runner } from "./runner";
 import { killAllProcesses, activeProcesses } from "./process/process-manager";
 import {
@@ -404,10 +410,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         // --- Orchestrator loop detection (execution mode only, after task assignment phase) ---
-        if (
-            isExecutingMode(OrchestratorState.currentState) &&
-            isPastTaskAssignmentPhase()
-        ) {
+        if (isExecutingMode(OrchestratorState.currentState) && isPastTaskAssignmentPhase()) {
             const signature = buildTurnSignature();
 
             if (getLastTurnSignature() === signature) {
@@ -501,7 +504,15 @@ function enforceSubAgentLimits(): void {
             const elapsedSinceLastActivity = Date.now() - state.lastActivityAt;
             if (elapsedSinceLastActivity > idleMs) {
                 const _p = OrchestratorState.pi;
-                if (_p) { try { _p.appendEntry("orchestration-status", { title: "Sub-agent idle timeout", message: `[watchdog] Sub-agent ${agentId} idle timeout — no JSON stream activity for ${formatTimeout(idleMs)} (last seen ${(elapsedSinceLastActivity / 1000).toFixed(0)}s ago). Killing.`, timestamp: Date.now() }); } catch {} }
+                if (_p) {
+                    try {
+                        _p.appendEntry("orchestration-status", {
+                            title: "Sub-agent idle timeout",
+                            message: `[watchdog] Sub-agent ${agentId} idle timeout — no JSON stream activity for ${formatTimeout(idleMs)} (last seen ${(elapsedSinceLastActivity / 1000).toFixed(0)}s ago). Killing.`,
+                            timestamp: Date.now()
+                        });
+                    } catch {}
+                }
                 child.kill("SIGTERM");
                 state.killedByWatchdog = "idle_timeout";
                 continue; // don't also check max-turns for the same agent
@@ -511,7 +522,15 @@ function enforceSubAgentLimits(): void {
         // Check max turns.
         if (maxTurns > 0 && state.turnCount >= maxTurns) {
             const _p = OrchestratorState.pi;
-            if (_p) { try { _p.appendEntry("orchestration-status", { title: "Sub-agent max turns exceeded", message: `[watchdog] Sub-agent ${agentId} exceeded max turns limit of ${maxTurns} (at turn ${state.turnCount}). Killing.`, timestamp: Date.now() }); } catch {} }
+            if (_p) {
+                try {
+                    _p.appendEntry("orchestration-status", {
+                        title: "Sub-agent max turns exceeded",
+                        message: `[watchdog] Sub-agent ${agentId} exceeded max turns limit of ${maxTurns} (at turn ${state.turnCount}). Killing.`,
+                        timestamp: Date.now()
+                    });
+                } catch {}
+            }
             child.kill("SIGTERM");
             state.killedByWatchdog = "max_turns";
         }

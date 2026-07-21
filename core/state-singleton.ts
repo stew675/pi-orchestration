@@ -146,8 +146,6 @@ export const OrchestratorState = {
     _verifyingTurnCounterActive: false,
     /** Flag to prevent writing stale data to disk while shutting the orchestration mode down */
     shuttingDown: false,
-
-
 } as OrchestratorStateExternal;
 
 

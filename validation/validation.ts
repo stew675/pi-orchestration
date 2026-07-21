@@ -302,7 +302,7 @@ export function autoHealFileConflicts(tasks: Task[]): void {
     const { ancestors, tasksMap, isReadOnlyByTask } = buildGraphData(tasks);
     const fileToTasksMap = buildFileToTasks(tasks);
 
-    for (const [file, fileTaskIds] of fileToTasksMap.entries()) {
+    for (const [, fileTaskIds] of fileToTasksMap.entries()) {
         if (fileTaskIds.length < 2) continue;
 
         for (let i = 0; i < fileTaskIds.length; i++) {
