@@ -347,6 +347,63 @@ export default function (pi: ExtensionAPI) {
     /** Track orchestrator tool calls per turn for loop detection.
      *  Run at turn_end to detect repetitive identical turns during execution mode. */
     pi.on("turn_end", async (_event, _ctx) => {
+        // --- Verifying phase turn limit enforcement ---
+        if (OrchestratorState.currentState === "verifying") {
+            // Reset counter on first turn after entering verifying (catches re-entry via remedial tasks)
+            if (!OrchestratorState._verifyingTurnCounterActive) {
+                OrchestratorState._verifyingTurnCounterActive = true;
+                OrchestratorState._verifyingOrchestratorTurnCount = 0;
+            }
+            OrchestratorState._verifyingOrchestratorTurnCount++;
+            const maxTurns = OrchestratorState.verifyingOrchestratorMaxTurns;
+            if (maxTurns > 0 && OrchestratorState._verifyingOrchestratorTurnCount >= maxTurns) {
+                notifyTuiOnly(
+                    pi,
+                    `[watchdog] Orchestrator exceeded verifying turn limit of ${maxTurns} (at turn ${OrchestratorState._verifyingOrchestratorTurnCount}). Force-approving.`
+                );
+
+                // Force transition to completed and notify user.
+                const plan = StateManager.loadPlan();
+                if (plan) {
+                    try {
+                        import("./core/state-machine").then(({ transitionTo }) => {
+                            transitionTo("completed");
+                            const updatedPlan = StateManager.loadPlan();
+                            if (updatedPlan) {
+                                if (!updatedPlan.attributes) updatedPlan.attributes = [];
+                                if (!updatedPlan.attributes.includes("VERIFIED")) {
+                                    updatedPlan.attributes.push("VERIFIED");
+                                }
+                                StateManager.savePlan(updatedPlan);
+                            }
+                        });
+                    } catch (e) {
+                        notifyTuiOnly(pi, "Failed during force-approve: " + String(e));
+                    }
+                }
+
+                // Wake the orchestrator with a final message so it sees the state change.
+                try {
+                    pi.sendMessage(
+                        {
+                            customType: "orchestrator_event",
+                            content: `System: Verification turn limit reached (${maxTurns} turns). The plan has been auto-approved. You may call orchestrate_approve_goal to finalize or proceed normally.`,
+                            display: true
+                        },
+                        { triggerTurn: true }
+                    );
+                } catch (e) {
+                    notifyTuiOnly(pi, "Failed to send force-approve message: " + String(e));
+                }
+            }
+        } else {
+            // Reset counter and flag when we leave verifying
+            if (OrchestratorState._verifyingTurnCounterActive) {
+                OrchestratorState._verifyingTurnCounterActive = false;
+                OrchestratorState._verifyingOrchestratorTurnCount = 0;
+            }
+        }
+
         // --- Orchestrator loop detection (execution mode only, after task assignment phase) ---
         if (
             isExecutingMode(OrchestratorState.currentState) &&

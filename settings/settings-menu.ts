@@ -8,6 +8,7 @@ import {
     setParallelTasks,
     setTimeoutMs,
     setSubAgentMaxTurns,
+    setVerifyingOrchestratorMaxTurns,
     setBooleanSetting
 } from "../core";
 import { isActive as stateIsActive, isPlanningMode } from "../core/state-machine";
@@ -122,6 +123,7 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
                 `  Task summary timeout:  ${formatTimeout(OrchestratorState.taskSummaryTimeoutMs)}\n` +
                 `  Sub-agent idle timeout:${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)}\n` +
                 `  Sub-agent max turns:   ${OrchestratorState.subAgentMaxTurns}\n` +
+                `  Verifying turn limit:  ${OrchestratorState.verifyingOrchestratorMaxTurns === 0 ? "unlimited" : OrchestratorState.verifyingOrchestratorMaxTurns}\n` +
                 `  Allow stop tool:       ${OrchestratorState.allowStopTool ? "enabled" : "disabled"}\n` +
                 `  Validate simple tasks: ${OrchestratorState.validateSimpleTasks ? "enabled" : "disabled"}\n` +
                 `  Validate complex tasks: ${OrchestratorState.validateComplexTasks ? "enabled" : "disabled"}\n` +
@@ -178,7 +180,8 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
             { value: "timeout-validator", label: `Validator timeout (${formatTimeout(OrchestratorState.validatorTimeoutMs)})` },
             { value: "timeout-task-summary", label: `Task summary timeout (${formatTimeout(OrchestratorState.taskSummaryTimeoutMs)})` },
             { value: "timeout-sub-agent-idle", label: `Sub-agent idle timeout (${formatTimeout(OrchestratorState.subAgentIdleTimeoutMs)})` },
-            { value: "max-turns", label: `Sub-agent max turns (${OrchestratorState.subAgentMaxTurns === 0 ? "unlimited" : OrchestratorState.subAgentMaxTurns})` }
+            { value: "max-turns", label: `Sub-agent max turns (${OrchestratorState.subAgentMaxTurns === 0 ? "unlimited" : OrchestratorState.subAgentMaxTurns})` },
+            { value: "verifying-max-turns", label: `Verifying turn limit (${OrchestratorState.verifyingOrchestratorMaxTurns === 0 ? "unlimited" : OrchestratorState.verifyingOrchestratorMaxTurns})` }
         ];
     }
 
@@ -231,6 +234,12 @@ export async function openSettingsMenu(ctx: ExtensionContext, pi: ExtensionAPI):
         "max-turns": async () => {
             await handleNumberInput(ctx, "Sub-agent max turns", OrchestratorState.subAgentMaxTurns, 0, (val) => {
                 setSubAgentMaxTurns(val);
+                persistSettings(OrchestratorState);
+            });
+        },
+        "verifying-max-turns": async () => {
+            await handleNumberInput(ctx, "Verifying turn limit", OrchestratorState.verifyingOrchestratorMaxTurns, 0, (val) => {
+                setVerifyingOrchestratorMaxTurns(val);
                 persistSettings(OrchestratorState);
             });
         },

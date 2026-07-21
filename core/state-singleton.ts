@@ -6,7 +6,8 @@ import {
     DEFAULT_VALIDATOR_TIMEOUT_MS,
     DEFAULT_SUMMARY_TIMEOUT_MS,
     DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
-    DEFAULT_SUB_AGENT_MAX_TURNS
+    DEFAULT_SUB_AGENT_MAX_TURNS,
+    DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS
 } from "./types";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
 import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, isPlanningMode, isExecutingMode, type OrchestrationState } from "./state-machine";
@@ -57,6 +58,10 @@ export const OrchestratorState = {
     subAgentIdleTimeoutMs: DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS, // idle timeout for any sub-agent (5m30s; 0 = disabled)
     subAgentMaxTurns: DEFAULT_SUB_AGENT_MAX_TURNS, // max model turns for any sub-agent (30; 0 = unlimited)
 
+    // --- Verifying phase orchestrator limits ---
+    verifyingOrchestratorMaxTurns: DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS, // max turns in VERIFICATION before auto-approve (50; 0 = unlimited)
+
+
     // --- Dynamic/Temporary Inter/Intra-State values ---
     /** Original main model captured when entering orchestration mode - restored on exit. */
     originalMainModel: undefined as ModelRef | undefined,
@@ -85,6 +90,10 @@ export const OrchestratorState = {
     _pendingReviewStart: false,
     /** One-shot flag: reviewer is scheduled to complete and switch back on agent_settled. */
     _pendingReviewCompletion: false,
+    /** Turn counter for the orchestrator while in VERIFICATION mode — reset when entering/exiting verifying. */
+    _verifyingOrchestratorTurnCount: 0,
+    /** Flag to track whether the verifying turn counter is active (prevents stale counts on re-entry). */
+    _verifyingTurnCounterActive: false,
     /** Flag to prevent writing stale data to disk while shutting the orchestration mode down */
     shuttingDown: false
 };
@@ -219,6 +228,8 @@ const STATE_DEFAULTS = {
     _incorporatingFeedback: false,
     _pendingReviewStart: false,
     _pendingReviewCompletion: false,
+    _verifyingOrchestratorTurnCount: 0,
+    _verifyingTurnCounterActive: false,
     allowStopTool: true,
     validateSimpleTasks: false,
     validateComplexTasks: true,
@@ -230,6 +241,9 @@ const STATE_DEFAULTS = {
     // --- Global sub-agent limits ---
     subAgentIdleTimeoutMs: DEFAULT_SUB_AGENT_IDLE_TIMEOUT_MS,
     subAgentMaxTurns: DEFAULT_SUB_AGENT_MAX_TURNS,
+
+    // --- Verifying phase orchestrator limits ---
+    verifyingOrchestratorMaxTurns: DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS,
 
     summarizationConcurrency: 0
 };
@@ -669,6 +683,11 @@ export function setTimeoutMs(
 /** Set the global max-turns limit for sub-agents. 0 means unlimited. */
 export function setSubAgentMaxTurns(value: number): void {
     OrchestratorState.subAgentMaxTurns = Math.max(0, value);
+}
+
+/** Set the orchestrator turn limit during VERIFICATION mode. 0 means unlimited. */
+export function setVerifyingOrchestratorMaxTurns(value: number): void {
+    OrchestratorState.verifyingOrchestratorMaxTurns = Math.max(0, value);
 }
 
 /** Toggle a boolean setting on OrchestratorState. */

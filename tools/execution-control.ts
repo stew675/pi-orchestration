@@ -301,6 +301,20 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
         async execute(_id, _params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
 
+            // Block during CODE_REVIEW — remediation must use tasks, not stop.
+            if (OrchestratorState.currentState === "code_review") {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "Cannot stop during CODE_REVIEW. Use orchestrate_add_task + orchestrate_start_task to issue remedial tasks, or orchestrate_complete_review if no action is needed."
+                        }
+                    ],
+                    terminate: false,
+                    details: {}
+                };
+            }
+
             // When stop is disabled by the user, return a nudge instead of halting.
             if (!OrchestratorState.allowStopTool) {
                 return {

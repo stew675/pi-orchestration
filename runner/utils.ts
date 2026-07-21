@@ -135,7 +135,8 @@ export function buildFinalReviewMessage(plan: OrchestrationPlan, introLine?: str
         "1. Inspect the project files and verify they satisfy the original goal.",
         "2. If a build/compile/test task already ran successfully (see above), do NOT add another verification task - the work was already validated.",
         "3. Only add a remediation task if you find a genuine gap (e.g., missing file, unverified behavior). Check completed tasks first!",
-        "4. If everything meets the goal, call orchestrate_approve_goal to finish."
+        "4. You cannot run executables or compile code directly — you have no bash tool in this phase. If verification requires running something, create a task for it.",
+        "5. If everything meets the goal, call orchestrate_approve_goal to finish."
     );
 
     return parts.join("\n");
