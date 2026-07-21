@@ -125,10 +125,8 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         throw new Error("goal is required for the first task. Pass the project goal string.");
                     }
 
-                    planDb = PlanDatabase.empty();
-                    setPlanDb(planDb);
-
-                    planDb.transaction((tx) => {
+                    const tempDb = PlanDatabase.empty();
+                    tempDb.transaction((tx) => {
                         tx.setGoal(params.goal.trim());
 
                         tx.addTask({
@@ -147,6 +145,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                             tx.deleteTask(params.replacesTaskId, true, [params.id]); // healDependencies=true, replacementTaskIds=[params.id]
                         }
                     });
+                    setPlanDb(tempDb);
                 }
             } catch (e) {
                 throw new Error(

@@ -152,6 +152,13 @@ export const OrchestratorState = {
 
 
 
+let onPlanDbChangedCallback: ((db: PlanDatabase | null) => void) | null = null;
+
+/** Register a listener to be notified when setPlanDb is called (used by persistence layer). */
+export function setPlanDbChangeListener(listener: (db: PlanDatabase | null) => void): void {
+    onPlanDbChangedCallback = listener;
+}
+
 /** Get the plan database directly (transactional access). */
 export function getPlanDb(): PlanDatabase | null {
     return OrchestratorState._planDb;
@@ -160,12 +167,7 @@ export function getPlanDb(): PlanDatabase | null {
 /** Set the plan database. Use this to replace the canonical in-memory store. */
 export function setPlanDb(value: PlanDatabase | null): void {
     OrchestratorState._planDb = value;
-    try {
-        const { wirePlanPersistence } = require("../context/persistence");
-        wirePlanPersistence();
-    } catch {
-        // Ignore circular import during initial module loading or test teardown
-    }
+    onPlanDbChangedCallback?.(value);
 }
 
 /**

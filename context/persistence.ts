@@ -5,7 +5,7 @@ import * as path from "path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { OrchestrationPlan, TaskType, ALL_TASK_STATUSES } from "../core/types";
 import { PlanDatabase } from "../core/plan-database";
-import { OrchestratorState, notifyTui as coreNotifyTui, getPlanDb, setPlanDb } from "../core";
+import { OrchestratorState, notifyTui as coreNotifyTui, getPlanDb, setPlanDb, setPlanDbChangeListener } from "../core";
 
 const ORCHESTRATION_BASE = path.join(process.cwd(), CONFIG_DIR_NAME, "orchestration");
 
@@ -129,6 +129,11 @@ export function wirePlanPersistence(): void {
         // All persistence flows through the debounced timer in startPlanSaveTimer().
     });
 }
+
+// Register change listener so setPlanDb automatically re-wires persistence
+setPlanDbChangeListener(() => {
+    wirePlanPersistence();
+});
 
 /** Fire UI listeners without invalidating the in-memory cache. Used by savePlan() - we already have the plan in memory, no need to re-read disk. */
 function notifyPlanChange(): void {

@@ -173,11 +173,11 @@ export default function (pi: ExtensionAPI) {
         const planDb = getPlanDb();
         if (planDb) {
             const recovered = planDb.recoverInterruptedTasks();
-            if (recovered > 0) {
+            if (recovered > 0 || planDb.isDirty()) {
                 try {
-                    PersistenceManager.savePlan(planDb.toJSON());
+                    PersistenceManager.flushPlan();
                 } catch (e) {
-                    notifyTuiOnly(pi, "Failed to persist recovered tasks during shutdown: " + String(e));
+                    notifyTuiOnly(pi, "Failed to persist plan during shutdown: " + String(e));
                 }
             }
         }

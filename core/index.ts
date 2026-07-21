@@ -56,7 +56,8 @@ export {
     setBooleanSetting,
     setModelRef,
     getPlanDb,
-    setPlanDb
+    setPlanDb,
+    setPlanDbChangeListener
 } from "./state-singleton";
 
 export type { ExecutionPhaseLabel } from "./state-singleton";

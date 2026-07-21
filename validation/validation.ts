@@ -21,8 +21,13 @@ function buildGraphData(
         isReadOnlyByTask.set(t.id, isTaskReadOnly(t.taskType ?? ("other" as TaskType)));
     }
 
+    const visiting = new Set<string>();
+
     function getAncestors(taskId: string): Set<string> {
         if (ancestors.has(taskId)) return ancestors.get(taskId)!;
+        if (visiting.has(taskId)) return new Set<string>(); // cycle detected, break recursion
+
+        visiting.add(taskId);
         const set = new Set<string>();
         const task = tasksMap.get(taskId);
         if (task && task.dependencies) {
@@ -33,6 +38,7 @@ function buildGraphData(
                 }
             }
         }
+        visiting.delete(taskId);
         ancestors.set(taskId, set);
         return set;
     }

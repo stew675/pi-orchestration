@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { OrchestrationPlan, Task } from "../core/types";
 import { PlanDatabase, PlanTransaction } from "../core/plan-database";
+import { setPlanDb, setPlanDbChangeListener } from "../core";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -866,4 +867,23 @@ describe("toMarkdown", () => {
         expect(md).toContain("[ ] Task (ID: task_phase2_b)"); // pending checkbox
     });
 });
+
+// ---------------------------------------------------------------------------
+// setPlanDbChangeListener — ESM listener registration
+// ---------------------------------------------------------------------------
+
+describe("setPlanDbChangeListener", () => {
+    it("notifies registered listener when setPlanDb is called", () => {
+        let listenerFired = false;
+        setPlanDbChangeListener((_db) => {
+            listenerFired = true;
+        });
+
+        const testDb = PlanDatabase.empty();
+        setPlanDb(testDb);
+
+        expect(listenerFired).toBe(true);
+    });
+});
+
 
