@@ -14,8 +14,17 @@ import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools
 import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, isPlanningMode, isExecutingMode, type OrchestrationState } from "./state-machine";
 
 /** External-facing shape of OrchestratorState.
- * _planDb is internal (access via getPlanDb()/setPlanDb()) but must remain
- * on the interface so the singleton's getter/setter compile correctly. */
+ * @internal
+ *
+ * IMPORTANT: This interface must stay in sync with:
+ *   1. The `OrchestratorState` object literal below (singleton properties)
+ *   2. The `STATE_DEFAULTS` constant (used by resetState())
+ *
+ * If you add a new field to OrchestratorState, also add it here and to STATE_DEFAULTS.
+ * TypeScript won't catch additions to the singleton that are missing from this interface
+ * (the `as OrchestratorStateExternal` assertion allows excess properties).
+ * Conversely, adding fields to this interface but not the singleton WILL cause a compile error.
+ */
 interface OrchestratorStateExternal {
     currentState: OrchestrationState;
     pi: ExtensionAPI | undefined;

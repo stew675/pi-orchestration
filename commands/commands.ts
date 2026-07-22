@@ -152,7 +152,7 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
             }
         }
         const reviewMessage = buildFinalReviewMessage(
-            getPlanDb()!.toJSON(),
+            planDb.toJSON(),
             "System: All tasks completed on resume. Entering FINAL REVIEW."
         );
         sendResumeMessage(pi, reviewMessage);

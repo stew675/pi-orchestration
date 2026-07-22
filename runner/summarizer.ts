@@ -212,6 +212,7 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     if (result?.error) {
         notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Failed to generate summary: ${result.error}`);
         planDb.transaction((tx: PlanTransaction) => {
+            if (!tx.hasTask(taskId)) return; // task deleted during async summary
             tx.updateTask(taskId, { status: "failed", validatorFeedback: `Summary generation failed: ${result.error}` });
         });
 
@@ -223,6 +224,10 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
 
     planDb.transaction((tx: PlanTransaction) => {
+        if (!tx.hasTask(taskId)) {
+            // Task was deleted (e.g., replanning during async summary). Skip silently.
+            return;
+        }
         const existingResult = tx.getTask(taskId)?.result;
         tx.updateTask(taskId, { status: "completed", result: { ...(existingResult || {}), summary: summaryText } });
     });
