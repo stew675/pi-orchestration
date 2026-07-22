@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { PersistenceManager } from "../context/persistence";
-import { Runner, notifyOrchestrator, notifyTuiOnly } from "../runner";
+import { runTasks, notifyOrchestrator, notifyTuiOnly } from "../runner";
 import { killAllProcesses } from "../process/process-manager";
 import { OrchestratorState, NOT_ACTIVE_MSG, getPi, getPlanDb } from "../core";
 import { isActive as stateIsActive, isExecutingMode } from "../core/state-machine";
@@ -46,7 +46,7 @@ export function registerExecutionControlTools(pi: ExtensionAPI) {
             for (const task of tasks) {
                 if (task.status === "completed") continue;
 
-                if (ACTIVE_TASK_STATUSES.includes(task.status as string)) {
+                if (ACTIVE_TASK_STATUSES.includes(task.status as any)) {
                     running.push(task.id);
                 } else if (task.status === "failed") {
                     failed.push(task.id);
@@ -92,7 +92,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             taskId: Type.String()
         }),
         executionMode: "sequential",
-        async execute(_id, params, _signal, _onUpdate, ctx) {
+        async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             if (!isExecutingMode(OrchestratorState.currentState)) {
                 throw new Error(
@@ -142,7 +142,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
             planDb.transaction((tx) => { tx.setCurrentTaskId(task.id); });
 
-            Runner.runTasks(getPi()).catch((err) => {
+            runTasks(getPi()).catch((err) => {
                 notifyTuiOnly(pi, "Runner error: " + String(err));
                 notifyOrchestrator(
                     getPi(),
@@ -233,7 +233,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             answer: Type.String()
         }),
         executionMode: "sequential",
-        async execute(_id, params, _signal, _onUpdate, ctx) {
+        async execute(_id, params, _signal, _onUpdate, _ctx) {
             if (!stateIsActive(OrchestratorState.currentState)) throw new Error(NOT_ACTIVE_MSG);
             if (!isExecutingMode(OrchestratorState.currentState)) {
                 throw new Error(
@@ -270,7 +270,7 @@ Note: task(s) ${failed.join(", ")} failed. Use orchestrate_replan to enter recov
             }
 
             // Re-run tasks, passing the clarification data
-            Runner.runTasks(getPi(), undefined, {
+            runTasks(getPi(), undefined, {
                 taskId: params.taskId,
                 answer: params.answer
             }).catch((err) => {

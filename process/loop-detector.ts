@@ -330,65 +330,65 @@ class OrchestratorLoopDetector {
 }
 
 // Singleton instance
-const _orchestratorLoopDetector = new OrchestratorLoopDetector();
+export const orchestratorLoopDetector = new OrchestratorLoopDetector();
 
 // Convenience wrappers around the singleton OrchestratorLoopDetector instance.
 // The class methods carry the full JSDoc; these delegates are kept thin for
 // ergonomic access from index.ts without importing the class directly.
 export function buildTurnSignature(): string {
-    return _orchestratorLoopDetector.buildTurnSignature();
+    return orchestratorLoopDetector.buildTurnSignature();
 }
 
 export function recordToolExecution(toolCallId: string, toolName: string, args: Record<string, unknown>): void {
-    _orchestratorLoopDetector.recordToolExecution(toolCallId, toolName, args);
+    orchestratorLoopDetector.recordToolExecution(toolCallId, toolName, args);
 }
 
 export function clearTurnTools(): void {
-    _orchestratorLoopDetector.clearTurnTools();
+    orchestratorLoopDetector.clearTurnTools();
 }
 
 export function getLastTurnSignature(): string | null {
-    return _orchestratorLoopDetector.getLastTurnSignature();
+    return orchestratorLoopDetector.getLastTurnSignature();
 }
 
 export function setLastTurnSignature(sig: string | null): void {
-    _orchestratorLoopDetector.setLastTurnSignature(sig);
+    orchestratorLoopDetector.setLastTurnSignature(sig);
 }
 
 export function incrementConsecutiveCount(): void {
-    _orchestratorLoopDetector.incrementConsecutiveCount();
+    orchestratorLoopDetector.incrementConsecutiveCount();
 }
 
 export function getConsecutiveCount(): number {
-    return _orchestratorLoopDetector.getConsecutiveCount();
+    return orchestratorLoopDetector.getConsecutiveCount();
 }
 
 export function resetConsecutiveCount(): void {
-    _orchestratorLoopDetector.resetConsecutiveCount();
+    orchestratorLoopDetector.resetConsecutiveCount();
 }
 
 export function setLoopBreakerFired(): void {
-    _orchestratorLoopDetector.setLoopBreakerFired();
+    orchestratorLoopDetector.setLoopBreakerFired();
 }
 
 export function isLoopBreakerFired(): boolean {
-    return _orchestratorLoopDetector.isLoopBreakerFired();
+    return orchestratorLoopDetector.isLoopBreakerFired();
 }
 
 export function resetLoopBreakerFlag(): void {
-    _orchestratorLoopDetector.resetLoopBreakerFlag();
+    orchestratorLoopDetector.resetLoopBreakerFlag();
 }
 
 export function signalTaskStarted(): void {
-    _orchestratorLoopDetector.signalTaskStarted();
+    orchestratorLoopDetector.signalTaskStarted();
 }
 
 export function isPastTaskAssignmentPhase(): boolean {
-    return _orchestratorLoopDetector.isPastTaskAssignmentPhase();
+    return orchestratorLoopDetector.isPastTaskAssignmentPhase();
 }
 
 export function resetLoopState(): void {
-    _orchestratorLoopDetector.resetLoopState();
+    orchestratorLoopDetector.resetLoopState();
 }
 
 /** Threshold constant exported for index.ts turn_end logic. */

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { Runner } from "../runner";
+import { cancelAllSummaries } from "../runner";
 import { OrchestratorState, getPi, setOrchestrationMode, NOT_ACTIVE_MSG, getPlanDb } from "../core";
 import { refreshBorder } from "../ui/ui";
 import { resetLoopState } from "../process/loop-detector";
@@ -50,7 +50,7 @@ export function registerReviewTools(pi: ExtensionAPI) {
 
             // Clear all internal orchestrator state so a new goal starts fresh.
             resetLoopState();
-            Runner.cancelAllSummaries();
+            cancelAllSummaries();
 
             // Transition to completed state and out of execution mode via the state machine
             setOrchestrationMode("completed", getPi(), refreshBorder);

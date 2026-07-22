@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OrchestrationPlan, Task } from "../core/types";
 import type { PlanDatabase } from "../core/plan-database";
-import { OrchestratorState } from "../core";
+import { notifyTui } from "../core";
 
 /**
  * Find the next task that needs work, or null if all done.
@@ -27,11 +27,6 @@ export function findNextTaskToRun(planDb: PlanDatabase): Task | null {
     return nonCompleted || null;
 }
 
-/** Regex patterns for extracting a short title from notification messages. */
-const TASK_NAME_RE = /Task '([^']+)'/;
-const ACTION_VERB_RE = /\b(failed|completed|paused|resumed)\b/i;
-const SYSTEM_PREFIX_RE = /^System[:\s]*/;
-
 /**
  * Reliable notification to the orchestrator.
  * Uses pi.sendMessage with triggerTurn for guaranteed delivery.
@@ -46,8 +41,7 @@ export function notifyOrchestrator(pi: ExtensionAPI, message: string, options?: 
         const showTui = options?.tuiVisible !== false;
 
         if (showTui) {
-            // Append a TUI-only status entry (visible in transcript, not sent to LLM context).
-            appendOrchestratorStatusEntry(pi, message);
+            notifyTui(message, pi);
         }
 
         pi.sendMessage(
@@ -59,7 +53,7 @@ export function notifyOrchestrator(pi: ExtensionAPI, message: string, options?: 
             { triggerTurn: true }
         );
     } catch (e) {
-        const p = OrchestratorState.pi; if (p) { try { p.appendEntry("orchestration-status", { title: "Notification failed", message: "Failed to send orchestrator notification: " + String(e), timestamp: Date.now() }); } catch {} }
+        notifyTui("Notification failed: " + String(e));
     }
 }
 
@@ -69,42 +63,7 @@ export function notifyOrchestrator(pi: ExtensionAPI, message: string, options?: 
  * If pi is undefined, falls back to OrchestratorState.pi internally.
  */
 export function notifyTuiOnly(pi: ExtensionAPI | undefined, message: string): void {
-    const targetPi = pi || OrchestratorState.pi;
-    if (!targetPi) return; // nothing we can do
-    try {
-        appendOrchestratorStatusEntry(targetPi, message);
-    } catch (e) {
-        // Non-fatal - TUI notification itself failed, nothing we can do
-    }
-}
-
-/** Append a TUI-only orchestration status entry (does NOT participate in LLM context). */
-function appendOrchestratorStatusEntry(pi: ExtensionAPI, message: string): void {
-    try {
-        const titleMatch = message.match(TASK_NAME_RE);
-
-        let title: string;
-        if (titleMatch) {
-            // e.g., "Task 'task_phase1' failed"
-            const taskName = titleMatch[1];
-            const actionIndex = message.indexOf(taskName);
-            const beforeAction = message.substring(0, Math.min(actionIndex + 50, message.length));
-            const verbMatch = beforeAction.match(ACTION_VERB_RE);
-            title = `${taskName} ${verbMatch ? verbMatch[1] : "event"}`;
-        } else {
-            // Fall back to first 110 chars after stripping "System:" prefix.
-            title = message.substring(0, 110).replace(SYSTEM_PREFIX_RE, "").trim() || "Orchestration event";
-        }
-
-        pi.appendEntry("orchestration-status", {
-            title,
-            message: message.replace(SYSTEM_PREFIX_RE, ""),
-            timestamp: Date.now()
-        });
-    } catch (e) {
-        // Non-fatal - status entry is purely cosmetic. The sendMessage below still works.
-        // Non-fatal - TUI status entry is purely cosmetic, ignoring error
-    }
+    notifyTui(message, pi);
 }
 
 /**

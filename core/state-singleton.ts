@@ -420,18 +420,41 @@ export function beginShutdown(): void {
     OrchestratorState.shuttingDown = true;
 }
 
+/** Regex patterns for extracting a short title from notification messages. */
+const TASK_NAME_RE = /Task '([^']+)'/;
+const ACTION_VERB_RE = /\b(failed|completed|paused|resumed)\b/i;
+const SYSTEM_PREFIX_RE = /^System[:\s]*/;
+
 /**
  * Fire a TUI-only notification (non-fatal).
  * Appends to the "orchestration-status" channel so it appears in the transcript
- * without polluting LLM context. Uses `OrchestratorState.pi` internally.
+ * without polluting LLM context. Uses `pi` parameter or `OrchestratorState.pi` fallback.
  * Safe to call before pi is initialised — silently no-ops if unavailable.
  */
-export function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
-        try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
+export function notifyTui(msg: string, pi?: ExtensionAPI): void {
+    const targetPi = pi || OrchestratorState.pi;
+    if (!targetPi) return;
+
+    try {
+        const titleMatch = msg.match(TASK_NAME_RE);
+        let title: string;
+        if (titleMatch) {
+            const taskName = titleMatch[1];
+            const actionIndex = msg.indexOf(taskName);
+            const beforeAction = msg.substring(0, Math.min(actionIndex + 50, msg.length));
+            const verbMatch = beforeAction.match(ACTION_VERB_RE);
+            title = `${taskName} ${verbMatch ? verbMatch[1] : "event"}`;
+        } else {
+            title = msg.substring(0, 110).replace(SYSTEM_PREFIX_RE, "").trim() || "Orchestration event";
+        }
+
+        targetPi.appendEntry("orchestration-status", {
+            title,
+            message: msg.replace(SYSTEM_PREFIX_RE, ""),
+            timestamp: Date.now()
+        });
+    } catch {
+        /* non-fatal */
     }
 }
 

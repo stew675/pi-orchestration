@@ -6,7 +6,7 @@ import {
     stopPlanSaveTimer,
     wirePlanPersistence
 } from "./context/persistence";
-import { Runner } from "./runner";
+import { cancelAllSummaries } from "./runner";
 import { killAllProcesses, activeProcesses } from "./process/process-manager";
 import {
     OrchestratorState,
@@ -26,7 +26,7 @@ import {
     startExecutionFromPlan,
     showAcceptOrEditDialog
 } from "./commands/commands";
-import { registerTools } from "./tools";
+import { registerTools } from "./tools/index";
 import { registerValidatorTools } from "./tools/validator-tools";
 import { registerCodeReviewTools } from "./tools/code-review-tools";
 import { setupUIWidget, setOrchestrationEditor } from "./ui/ui";
@@ -164,7 +164,7 @@ export default function (pi: ExtensionAPI) {
         // Signal the runner to stop writing stale state
         beginShutdown();
         // Cancel any in-flight task summaries
-        Runner.cancelAllSummaries();
+        cancelAllSummaries();
         // Clear plan change listeners to prevent leaks across sessions
         drainPlanChangeListeners();
 

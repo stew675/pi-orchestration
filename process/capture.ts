@@ -22,7 +22,7 @@ const CAPTURED_OUTPUT_TAIL_LINES = 100;
  * Handles both legacy event types (tool_call / tool_result) and the newer
  * streaming format (tool_execution_start / tool_execution_end).
  */
-function formatLine(raw: string): string | null {
+export function formatLine(raw: string): string | null {
     const ev = tryParseSubAgentEvent(raw);
     if (!ev) return null;
 
