@@ -83,6 +83,13 @@ export default function (pi: ExtensionAPI) {
     let watchdogTimer: NodeJS.Timeout | null = null;
 
     pi.on("session_start", async (_event, ctx) => {
+        // Reset all in-memory state to ensure a clean slate after reload or session replacement.
+        resetState();
+
+        // Re-assign pi after reset (resetState clears it back to undefined)
+        OrchestratorState.pi = pi;
+        OrchestratorState.theme = ctx.ui.theme;
+
         if (!watchdogTimer) {
             watchdogTimer = setInterval(() => {
                 // --- Sub-agent idle/turns enforcement ---
@@ -118,10 +125,6 @@ export default function (pi: ExtensionAPI) {
                 }
             }, WATCHDOG_INTERVAL_MS);
         }
-
-        // Reset all in-memory state to ensure a clean slate after reload or session replacement.
-        resetState();
-        OrchestratorState.theme = ctx.ui.theme;
 
         // Restore persisted model preferences
         applySettingsToState(OrchestratorState);
