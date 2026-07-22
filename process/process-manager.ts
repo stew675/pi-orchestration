@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as capture from "./capture";
-import { tryParseSubAgentEvent, getEventToolName, getEventParams } from "../core/types";
 import { OrchestratorState } from "../core";
 import { notifyTuiOnly } from "../runner/utils";
 
@@ -123,7 +122,7 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
         }
 
         // Feed through streaming extractor - accumulate formatted output in memory.
-        const extractedLine = formatAndExtract(line);
+        const extractedLine = capture.formatLine(line);
         if (extractedLine !== null) {
             extractedLines.push(extractedLine);
         }
@@ -203,61 +202,6 @@ export function spawnAgent(args: string[], options: SpawnOptions, onStdoutLine?:
     };
 }
 
-/** Format a single raw line into extracted plain-text, or null if skipped.
- *
- * Reuses the same extraction logic as capture.ts (extractText, summarizeToolCall,
- * parseToolResult) so there is only one implementation of these formatters. The
- * wrapper here adds a skip for streaming deltas and delegates to the shared functions.
- */
-function formatAndExtract(rawLine: string): string | null {
-    const ev = tryParseSubAgentEvent(rawLine);
-    if (!ev) return null;
-    if (ev.type === "message_update") return null; // skip streaming deltas
 
-    switch (ev.type) {
-        case "message_end": {
-            const role = String(ev.message?.role ?? "");
-            if (!["user", "assistant"].includes(role)) return null;
-            const text = capture.extractText(ev.message);
-            // Use shared extractToolCalls from capture.ts
-            const toolCalls = capture.extractToolCalls(ev.message);
-            if (!text && toolCalls.length === 0) return null;
-
-            let line = "";
-            if (role === "user") {
-                line = `[prompt] ${capture.truncateText(text, capture.MAX_DIAGNOSTIC_MESSAGE_LEN)}`;
-            } else {
-                const parts: string[] = [];
-                if (text) parts.push(capture.truncateText(text, capture.MAX_DIAGNOSTIC_MESSAGE_LEN));
-                if (toolCalls.length > 0) parts.push(`→ called ${toolCalls.join(", ")}`);
-                line = parts.join(" | ");
-            }
-            return line;
-        }
-
-        case "tool_call":
-        case "tool_execution_start": {
-            const toolName = getEventToolName(ev);
-            const params = getEventParams(ev);
-            return `→ ${capture.summarizeToolCall(toolName, params)}`;
-        }
-
-        case "tool_result":
-        case "tool_execution_end": {
-            const toolName = getEventToolName(ev);
-            const { success, text: resultText } = capture.parseToolResult(ev);
-            const indicator = success ? "✓" : "✗";
-            return `  [${indicator}] ${toolName}: ${capture.truncateText(resultText, capture.MAX_TOOL_RESULT_LEN)}`;
-        }
-
-        case "error": {
-            const msg = typeof ev.message === "string" ? ev.message : JSON.stringify(ev);
-            return `⚠ ${msg.slice(0, capture.MAX_DIAGNOSTIC_MESSAGE_LEN)}`;
-        }
-
-        default:
-            return null;
-    }
-}
 
 

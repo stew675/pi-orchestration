@@ -239,10 +239,22 @@ export class PlanTransaction {
             throw new Error(`Task ${id} not found`);
         }
 
-        // Merge fields explicitly provided in `partial`.
-        for (const [key, value] of Object.entries(partial)) {
-            (existing as unknown as Record<string, unknown>)[key] = value;
-        }
+        // Merge fields explicitly provided in `partial`. Using individual assignments
+        // instead of a dynamic loop to avoid silent property injection from invalid keys.
+        if (partial.description !== undefined) existing.description = partial.description;
+        if (partial.files !== undefined) existing.files = partial.files;
+        if (partial.dependencies !== undefined) existing.dependencies = partial.dependencies;
+        if (partial.status !== undefined) existing.status = partial.status;
+        if (partial.result !== undefined) existing.result = partial.result;
+        if (partial.validatorFeedback !== undefined) existing.validatorFeedback = partial.validatorFeedback;
+        if (partial.complexity !== undefined) existing.complexity = partial.complexity;
+        if (partial.taskType !== undefined) existing.taskType = partial.taskType;
+        if (partial.timeoutMs !== undefined) existing.timeoutMs = partial.timeoutMs;
+        if (partial.startedAt !== undefined) existing.startedAt = partial.startedAt;
+        if (partial.clarificationQuery !== undefined) existing.clarificationQuery = partial.clarificationQuery;
+        if (partial.clarificationAttempts !== undefined) existing.clarificationAttempts = partial.clarificationAttempts;
+        if (partial.clarificationHistory !== undefined) existing.clarificationHistory = partial.clarificationHistory;
+        if (partial.attempts !== undefined) existing.attempts = partial.attempts;
 
         this._tasks.set(id, existing);
     }

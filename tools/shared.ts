@@ -1,12 +1,5 @@
 import { OrchestratorState, getPi, NOT_ACTIVE_MSG } from "../core";
 import { isPlanningMode, isActive as stateIsActive } from "../core/state-machine";
-import {
-    detectCycle,
-    detectFileConflicts,
-    detectOversizedTasks,
-    formatFileConflictError,
-    autoHealFileConflicts
-} from "../validation/validation";
 import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
 import { Markdown } from "@earendil-works/pi-tui";
 
@@ -35,7 +28,7 @@ export function renderWritePlanResult(_result: any, options: { isPartial: boolea
 }
 
 /** Render the orchestrate_write_plan tool call with progressive streaming preview. */
-export function renderWritePlanCall(_args: any, theme: any, context: { isPartial: boolean; argsComplete: boolean }) {
+export function renderWritePlanCall(_args: any, theme: any, _context: { isPartial: boolean; argsComplete: boolean }) {
     const content = (_args as Record<string, unknown>)?.content;
     if (typeof content === "string" && content.trim().length > 0) {
         return createMarkdown(content);
@@ -46,63 +39,13 @@ export function renderWritePlanCall(_args: any, theme: any, context: { isPartial
 }
 
 // ---------------------------------------------------------------------------
-// Plan validation helpers (shared by task-crud tools)
-// ---------------------------------------------------------------------------
-
-/**
- * Performs safety checks on the plan to prevent circular dependencies and race conditions.
- * Throws an error if a critical violation is found.
- *
- * Note: dangling dependency detection has been moved to pre-mutation validators
- * (validateAddTask / validateEditTask) - the table should never reach save time
- * with invalid references.
- */
-export async function validatePlan(plan: any, archivedTaskIds?: Set<string>) {
-    // Automatically heal file conflicts by injecting dependencies in array-index order (Mechanism C: Implicit Safety Net)
-    autoHealFileConflicts(plan.tasks || []);
-
-    const cycle = detectCycle(plan);
-    if (cycle) {
-        if (cycle.length > 1 && cycle[0] !== cycle[cycle.length - 1]) {
-            throw new Error(
-                `Circular dependency detected in the task graph: ${cycle.join(" → ")}. Please review your task dependencies and remove the loop.`
-            );
-        }
-        throw new Error(
-            `Circular dependency detected in the task graph. Please review your task dependencies and remove the loop.`
-        );
-    }
-
-    const conflicts = detectFileConflicts(plan, archivedTaskIds);
-    if (conflicts.length > 0) {
-        throw new Error(formatFileConflictError(conflicts));
-    }
-
-    const oversized = detectOversizedTasks(plan);
-    if (oversized.length > 0) {
-        const taskDetails = oversized
-            .map(
-                (t: any) =>
-                    `\n- Task '${t.taskId}': ${t.fileCount} files (limit for "${t.taskType}": ${t.limit}) - "${t.description}"`
-            )
-            .join("");
-        throw new Error(
-            `Oversized task(s) detected: Tasks touching more than the allowed file count will likely timeout. ` +
-                `Split them into smaller tasks.${taskDetails}\n\n` +
-                `Limits by task_type: creation=2, editing=2, other=2. building/administrative/research/reviewing are exempt.`
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Pre-mutation plan validators
 // ---------------------------------------------------------------------------
 /**
  * Pre-mutation check for orchestrate_add_task.
  *
  * Validates that every dependency references an existing task (or self).
- * Cycle, conflict, and oversized checks are handled by the caller via
- * validatePlan on a simulated plan object.
+ * Cycle, conflict, and oversized checks are handled at transaction commit time.
  */
 export async function validateAddTask(existingTaskIds: Set<string>, newTaskId: string, dependencies: string[]) {
     // Dependency existence - must reference an existing task or self.
@@ -119,8 +62,7 @@ export async function validateAddTask(existingTaskIds: Set<string>, newTaskId: s
  * Pre-mutation check for orchestrate_edit_task.
  *
  * Validates that every new dependency references an existing task.
- * Cycle, conflict, and oversized checks are handled by the caller via
- * validatePlan on a simulated plan object.
+ * Cycle, conflict, and oversized checks are handled at transaction commit time.
  */
 export async function validateEditTask(existingTaskIds: Set<string>, newDependencies?: string[]) {
     if (newDependencies === undefined) return;

@@ -1,11 +1,11 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { Runner } from "../runner";
+import { cancelTaskSummary } from "../runner";
 import { activeProcesses } from "../process/process-manager";
 import { OrchestratorState, PlanDatabase, NOT_ACTIVE_MSG, getPlanDb, setPlanDb } from "../core";
 import { isActive as stateIsActive } from "../core/state-machine";
-import { isTaskReadOnly, type Task, type TaskType } from "../core/types";
+import { isTaskReadOnly, type TaskType } from "../core/types";
 import {
     clampTaskTimeout,
     isBuildTask,
@@ -125,9 +125,10 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
                         throw new Error("goal is required for the first task. Pass the project goal string.");
                     }
 
+                    const goal = params.goal.trim();
                     const tempDb = PlanDatabase.empty();
                     tempDb.transaction((tx) => {
-                        tx.setGoal(params.goal.trim());
+                        tx.setGoal(goal);
 
                         tx.addTask({
                             id: params.id,
@@ -306,7 +307,7 @@ export function registerTaskCrudTools(pi: ExtensionAPI) {
             }
 
             // Cancel any in-flight summary if we forcefully complete it
-            Runner.cancelTaskSummary(params.taskId);
+            cancelTaskSummary(params.taskId);
 
             planDb.transaction((tx) => {
                 const t = tx.getTask(params.taskId);

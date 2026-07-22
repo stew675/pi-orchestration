@@ -13,53 +13,6 @@ import { PlanDatabase } from "./plan-database";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
 import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, isPlanningMode, isExecutingMode, type OrchestrationState } from "./state-machine";
 
-/** External-facing shape of OrchestratorState.
- * _planDb is internal (access via getPlanDb()/setPlanDb()) but must remain
- * on the interface so the singleton's getter/setter compile correctly. */
-interface OrchestratorStateExternal {
-    currentState: OrchestrationState;
-    pi: ExtensionAPI | undefined;
-    theme: Theme | null;
-    /** @internal Plan database — use getPlanDb()/setPlanDb() instead. */
-    _planDb: PlanDatabase | null;
-    simpleTaskModel: ModelRef | null;
-    complexTaskModel: ModelRef | null;
-    summaryModel: ModelRef | null;
-    validatorModel: ModelRef | null;
-    orchestrationModel: ModelRef | null;
-    planningModel: ModelRef | null;
-    reviewerModel: ModelRef | null;
-    codeReviewModel: ModelRef | null;
-    summarizationConcurrency: number;
-    parallelTasks: number;
-    allowStopTool: boolean;
-    validateSimpleTasks: boolean;
-    validateComplexTasks: boolean;
-    debugLogTransitions: boolean;
-    taskTimeoutMs: number;
-    validatorTimeoutMs: number;
-    taskSummaryTimeoutMs: number;
-    subAgentIdleTimeoutMs: number;
-    subAgentMaxTurns: number;
-    verifyingOrchestratorMaxTurns: number;
-    originalMainModel: ModelRef | undefined;
-    prePlanningModel: ModelRef | undefined;
-    preReviewModel: ModelRef | undefined;
-    originalSystemPrompt: string | undefined;
-    pendingSystemPromptRestore: boolean;
-    shouldResetContext: boolean;
-    _planJustUpdated: boolean;
-    _planEditedThisTurn: boolean;
-    _preWriteHintSent: boolean;
-    _inReviewPhase: boolean;
-    _incorporatingFeedback: boolean;
-    _pendingReviewStart: boolean;
-    _pendingReviewCompletion: boolean;
-    _verifyingOrchestratorTurnCount: number;
-    _verifyingTurnCounterActive: boolean;
-    shuttingDown: boolean;
-}
-
 /**
  * Central orchestrator state singleton.
  *
@@ -148,7 +101,7 @@ export const OrchestratorState = {
     _verifyingTurnCounterActive: false,
     /** Flag to prevent writing stale data to disk while shutting the orchestration mode down */
     shuttingDown: false,
-} as OrchestratorStateExternal;
+};
 
 
 
@@ -273,7 +226,12 @@ export function requireActive(ctx: {
     return true;
 }
 
-/** Default values for all OrchestratorState properties. */
+/** Default values for all OrchestratorState properties.
+ *
+ * This is the canonical definition of resettable state. Every field here must also
+ * exist on {@link OrchestratorState} — enforced by {@link _assertDefaultsSubset} below.
+ * Fields added to OrchestratorState that should be reset between sessions MUST be added here.
+ */
 const STATE_DEFAULTS = {
     currentState: "inactive" as OrchestrationState,
     theme: null as Theme | null,
@@ -317,7 +275,9 @@ const STATE_DEFAULTS = {
     // --- Verifying phase orchestrator limits ---
     verifyingOrchestratorMaxTurns: DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS,
 
-    summarizationConcurrency: 0
+    summarizationConcurrency: 0,
+    parallelTasks: 1,
+    pi: undefined as ExtensionAPI | undefined
 };
 
 /**
@@ -329,6 +289,11 @@ export function resetState(): void {
         (OrchestratorState as unknown as Record<string, unknown>)[key] = value;
     }
 }
+
+// Compile-time assertion: every key in STATE_DEFAULTS must also be a key on OrchestratorState.
+// If this line errors, either add the missing field to OrchestratorState or remove it from defaults.
+type _DefaultsKeysSubsetOfState = keyof typeof STATE_DEFAULTS extends keyof typeof OrchestratorState ? true : never;
+const _assertDefaultsSubset: _DefaultsKeysSubsetOfState = true;
 
 /**
  * Signal that orchestration is exiting. Sets a flag so the next `before_agent_start`
@@ -455,18 +420,41 @@ export function beginShutdown(): void {
     OrchestratorState.shuttingDown = true;
 }
 
+/** Regex patterns for extracting a short title from notification messages. */
+const TASK_NAME_RE = /Task '([^']+)'/;
+const ACTION_VERB_RE = /\b(failed|completed|paused|resumed)\b/i;
+const SYSTEM_PREFIX_RE = /^System[:\s]*/;
+
 /**
  * Fire a TUI-only notification (non-fatal).
  * Appends to the "orchestration-status" channel so it appears in the transcript
- * without polluting LLM context. Uses `OrchestratorState.pi` internally.
+ * without polluting LLM context. Uses `pi` parameter or `OrchestratorState.pi` fallback.
  * Safe to call before pi is initialised — silently no-ops if unavailable.
  */
-export function notifyTui(msg: string): void {
-    const pi = OrchestratorState.pi;
-    if (pi) {
-        try {
-            pi.appendEntry("orchestration-status", { title: msg.substring(0, 60).trim(), message: msg, timestamp: Date.now() });
-        } catch { /* non-fatal */ }
+export function notifyTui(msg: string, pi?: ExtensionAPI): void {
+    const targetPi = pi || OrchestratorState.pi;
+    if (!targetPi) return;
+
+    try {
+        const titleMatch = msg.match(TASK_NAME_RE);
+        let title: string;
+        if (titleMatch) {
+            const taskName = titleMatch[1];
+            const actionIndex = msg.indexOf(taskName);
+            const beforeAction = msg.substring(0, Math.min(actionIndex + 50, msg.length));
+            const verbMatch = beforeAction.match(ACTION_VERB_RE);
+            title = `${taskName} ${verbMatch ? verbMatch[1] : "event"}`;
+        } else {
+            title = msg.substring(0, 110).replace(SYSTEM_PREFIX_RE, "").trim() || "Orchestration event";
+        }
+
+        targetPi.appendEntry("orchestration-status", {
+            title,
+            message: msg.replace(SYSTEM_PREFIX_RE, ""),
+            timestamp: Date.now()
+        });
+    } catch {
+        /* non-fatal */
     }
 }
 

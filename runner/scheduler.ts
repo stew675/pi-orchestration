@@ -167,15 +167,10 @@ export async function runTasks(
 
 /** Spawn a sibling runner for parallel task execution. */
 function spawnSiblingRunner(pi: ExtensionAPI, model?: ModelRef): void {
-    // Use dynamic import to avoid circular dependency (scheduler → runner → scheduler).
-    import("../runner")
-        .then(({ Runner }) => {
-            Runner.runTasks(pi, model).catch((err: Error) => {
-                notifyTuiOnly(pi, "Sibling runner error: " + String(err));
-            });
-        })
+    Promise.resolve()
+        .then(() => runTasks(pi, model))
         .catch((err: Error) => {
-            notifyTuiOnly(pi, "Failed to spawn sibling runner: " + String(err));
+            notifyTuiOnly(pi, "Sibling runner error: " + String(err));
         });
 }
 

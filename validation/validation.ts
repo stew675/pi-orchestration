@@ -308,6 +308,8 @@ export function autoHealFileConflicts(tasks: Task[]): void {
     const { ancestors, tasksMap, isReadOnlyByTask } = buildGraphData(tasks);
     const fileToTasksMap = buildFileToTasks(tasks);
 
+    // Iterate over the task-ID groups per file. The file path itself is not needed
+    // inside the loop — healing only requires the task IDs that share a file.
     for (const [, fileTaskIds] of fileToTasksMap.entries()) {
         if (fileTaskIds.length < 2) continue;
 

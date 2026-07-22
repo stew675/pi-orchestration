@@ -5,6 +5,7 @@ import { PersistenceManager } from "../context/persistence";
 import { OrchestratorState, getPi, getPlanDb } from "../core";
 import { runReadOnlyAgent } from "./subagent-spawner";
 import { notifyTuiOnly } from "./utils";
+import { runTasks } from "./scheduler";
 import { formatTimeout } from "../settings/time-utils";
 
 // ---------------------------------------------------------------------------
@@ -190,10 +191,8 @@ function resumeRunnerAfterSummary(): void {
     if (OrchestratorState.currentState === "implementing" && OrchestratorState.summarizationConcurrency > 0) {
         try {
             const pi = getPi();
-            import("../runner").then(({ Runner }) => {
-                Runner.runTasks(pi).catch((err: Error) => {
-                    notifyTuiOnly(OrchestratorState.pi, "Runner failed to auto-resume after background task summary: " + String(err));
-                });
+            runTasks(pi).catch((err: Error) => {
+                notifyTuiOnly(OrchestratorState.pi, "Runner failed to auto-resume after background task summary: " + String(err));
             });
         } catch (err) {
             notifyTuiOnly(OrchestratorState.pi, "Could not auto-resume runner: " + String(err));
@@ -212,6 +211,7 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
     if (result?.error) {
         notifyTuiOnly(OrchestratorState.pi, `[task-summary ${taskId}] Failed to generate summary: ${result.error}`);
         planDb.transaction((tx: PlanTransaction) => {
+            if (!tx.hasTask(taskId)) return; // task deleted during async summary
             tx.updateTask(taskId, { status: "failed", validatorFeedback: `Summary generation failed: ${result.error}` });
         });
 
@@ -223,6 +223,10 @@ function finalizeTaskSummary(taskId: string, result: { summary?: string; error?:
         result === null ? "Task executed successfully." : result.summary || "Task executed successfully.";
 
     planDb.transaction((tx: PlanTransaction) => {
+        if (!tx.hasTask(taskId)) {
+            // Task was deleted (e.g., replanning during async summary). Skip silently.
+            return;
+        }
         const existingResult = tx.getTask(taskId)?.result;
         tx.updateTask(taskId, { status: "completed", result: { ...(existingResult || {}), summary: summaryText } });
     });
@@ -322,7 +326,7 @@ function buildSummaryPrompt(
 
 /** Spawn a read-only sub-agent to produce a structured task summary.
  *  Retries once (max 2 attempts) on no-output or crash failures, matching validator pattern. */
-async function generateTaskSummary(
+export async function generateTaskSummary(
     task: { id: string; description?: string; files?: string[]; result?: Task["result"] },
     model?: ModelRef,
     sessionTranscript?: string

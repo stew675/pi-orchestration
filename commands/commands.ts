@@ -3,7 +3,7 @@ import { PersistenceManager } from "../context/persistence";
 import { PLANNING_HINT_EDIT } from "../context/prompts";
 import { killAllProcesses } from "../process/process-manager";
 import { buildFinalReviewMessage, notifyTuiOnly, findNextTaskToRun } from "../runner/utils";
-import { Runner } from "../runner";
+import { runTasks, resetSummarizer } from "../runner";
 import {
     OrchestratorState,
     requireActive,
@@ -114,7 +114,7 @@ function handleResumeCodeReview(pi: ExtensionAPI) {
             notifyTuiOnly(pi, "Failed to transition to implementing state on code review resume");
         }
     }
-    Runner.runTasks(pi).catch((err: Error) => {
+    runTasks(pi).catch((err: Error) => {
         notifyTuiOnly(pi, "Code review resume error: " + String(err));
     });
 }
@@ -140,7 +140,7 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
                     notifyTuiOnly(pi, "Failed to transition to implementing state on resume (code review model)");
                 }
             }
-            Runner.runTasks(pi);
+            runTasks(pi);
             return;
         }
         if (OrchestratorState.currentState === "paused") {
@@ -152,7 +152,7 @@ function handleResumeExecutingOrPaused(pi: ExtensionAPI) {
             }
         }
         const reviewMessage = buildFinalReviewMessage(
-            getPlanDb()!.toJSON(),
+            planDb.toJSON(),
             "System: All tasks completed on resume. Entering FINAL REVIEW."
         );
         sendResumeMessage(pi, reviewMessage);
@@ -453,7 +453,7 @@ export async function startExecutionFromPlan(pi: ExtensionAPI, ctx: ExtensionCon
     }
 
     // Reset summarizer state to prevent stale entries from previous plans within this session
-    Runner.resetSummarizer();
+    resetSummarizer();
 
     // Immediate feedback so the user knows their input was received
     ctx.ui.notify("Plan approved - starting orchestration execution…", "info");
