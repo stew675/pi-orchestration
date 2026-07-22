@@ -13,62 +13,6 @@ import { PlanDatabase } from "./plan-database";
 import { VALIDATE_PASS_TOOL, VALIDATE_FAIL_TOOL } from "../tools/validator-tools";
 import { getCurrentOrchestrationState, transitionTo, isActive as stateIsActive, isPlanningMode, isExecutingMode, type OrchestrationState } from "./state-machine";
 
-/** External-facing shape of OrchestratorState.
- * @internal
- *
- * IMPORTANT: This interface must stay in sync with:
- *   1. The `OrchestratorState` object literal below (singleton properties)
- *   2. The `STATE_DEFAULTS` constant (used by resetState())
- *
- * If you add a new field to OrchestratorState, also add it here and to STATE_DEFAULTS.
- * TypeScript won't catch additions to the singleton that are missing from this interface
- * (the `as OrchestratorStateExternal` assertion allows excess properties).
- * Conversely, adding fields to this interface but not the singleton WILL cause a compile error.
- */
-interface OrchestratorStateExternal {
-    currentState: OrchestrationState;
-    pi: ExtensionAPI | undefined;
-    theme: Theme | null;
-    /** @internal Plan database — use getPlanDb()/setPlanDb() instead. */
-    _planDb: PlanDatabase | null;
-    simpleTaskModel: ModelRef | null;
-    complexTaskModel: ModelRef | null;
-    summaryModel: ModelRef | null;
-    validatorModel: ModelRef | null;
-    orchestrationModel: ModelRef | null;
-    planningModel: ModelRef | null;
-    reviewerModel: ModelRef | null;
-    codeReviewModel: ModelRef | null;
-    summarizationConcurrency: number;
-    parallelTasks: number;
-    allowStopTool: boolean;
-    validateSimpleTasks: boolean;
-    validateComplexTasks: boolean;
-    debugLogTransitions: boolean;
-    taskTimeoutMs: number;
-    validatorTimeoutMs: number;
-    taskSummaryTimeoutMs: number;
-    subAgentIdleTimeoutMs: number;
-    subAgentMaxTurns: number;
-    verifyingOrchestratorMaxTurns: number;
-    originalMainModel: ModelRef | undefined;
-    prePlanningModel: ModelRef | undefined;
-    preReviewModel: ModelRef | undefined;
-    originalSystemPrompt: string | undefined;
-    pendingSystemPromptRestore: boolean;
-    shouldResetContext: boolean;
-    _planJustUpdated: boolean;
-    _planEditedThisTurn: boolean;
-    _preWriteHintSent: boolean;
-    _inReviewPhase: boolean;
-    _incorporatingFeedback: boolean;
-    _pendingReviewStart: boolean;
-    _pendingReviewCompletion: boolean;
-    _verifyingOrchestratorTurnCount: number;
-    _verifyingTurnCounterActive: boolean;
-    shuttingDown: boolean;
-}
-
 /**
  * Central orchestrator state singleton.
  *
@@ -157,7 +101,7 @@ export const OrchestratorState = {
     _verifyingTurnCounterActive: false,
     /** Flag to prevent writing stale data to disk while shutting the orchestration mode down */
     shuttingDown: false,
-} as OrchestratorStateExternal;
+};
 
 
 
@@ -282,7 +226,12 @@ export function requireActive(ctx: {
     return true;
 }
 
-/** Default values for all OrchestratorState properties. */
+/** Default values for all OrchestratorState properties.
+ *
+ * This is the canonical definition of resettable state. Every field here must also
+ * exist on {@link OrchestratorState} — enforced by {@link _assertDefaultsSubset} below.
+ * Fields added to OrchestratorState that should be reset between sessions MUST be added here.
+ */
 const STATE_DEFAULTS = {
     currentState: "inactive" as OrchestrationState,
     theme: null as Theme | null,
@@ -326,7 +275,9 @@ const STATE_DEFAULTS = {
     // --- Verifying phase orchestrator limits ---
     verifyingOrchestratorMaxTurns: DEFAULT_VERIFYING_ORCHESTRATOR_MAX_TURNS,
 
-    summarizationConcurrency: 0
+    summarizationConcurrency: 0,
+    parallelTasks: 1,
+    pi: undefined as ExtensionAPI | undefined
 };
 
 /**
@@ -338,6 +289,11 @@ export function resetState(): void {
         (OrchestratorState as unknown as Record<string, unknown>)[key] = value;
     }
 }
+
+// Compile-time assertion: every key in STATE_DEFAULTS must also be a key on OrchestratorState.
+// If this line errors, either add the missing field to OrchestratorState or remove it from defaults.
+type _DefaultsKeysSubsetOfState = keyof typeof STATE_DEFAULTS extends keyof typeof OrchestratorState ? true : never;
+const _assertDefaultsSubset: _DefaultsKeysSubsetOfState = true;
 
 /**
  * Signal that orchestration is exiting. Sets a flag so the next `before_agent_start`
