@@ -48,6 +48,7 @@ import {
     getLastTurnSignature,
     setLastTurnSignature,
     resetLoopBreakerFlag,
+    buildBannedToolSigs,
     ORCHESTRATOR_LOOP_THRESHOLD
 } from "./process/loop-detector";
 import { isActive, isPlanningMode, isExecutingMode } from "./core/state-machine";
@@ -81,6 +82,48 @@ export default function (pi: ExtensionAPI) {
     let isAgentIdle = true;
     let watchdogIdleCount = 0;
     let watchdogTimer: NodeJS.Timeout | null = null;
+
+    // --- Loop-escalation state (tool blocking after loop-breaker) ---
+    /** Banned tool-call signatures extracted from the last detected loop. Cleared on next non-loop turn or after max escalation rounds. */
+    let bannedToolSignatures: Set<string> | null = null;
+    /** Total tools blocked since bans were set (persists across turns for escalation intensity). Reset when bans cleared. */
+    let consecutiveBlocks = 0;
+    /** Number of escalation rounds (loop-breaker nudges sent while bans are active for re-offenders). Capped to avoid infinite spam. */
+    let escalationRounds = 0;
+
+    /** Build a normalised signature for a single tool call (mirrors loop-detector.ts).
+     *  Used by the tool_call handler to check against banned signatures. */
+    function _buildSingleSig(toolName: string, args: Record<string, unknown>): string {
+        if (toolName === "orchestrate_add_task" || toolName === "orchestrate_edit_task") return "";
+
+        const keyParams: string[] = [];
+        if (args.taskId) keyParams.push(`taskId=${args.taskId}`);
+        if (args.mode) keyParams.push(`mode=${args.mode}`);
+
+        switch (toolName) {
+            case "read":
+                if (args.path) keyParams.push(`path=${args.path}`);
+                break;
+            case "grep":
+                if (args.pattern) keyParams.push(`pattern=${args.pattern}`);
+                if (args.path) keyParams.push(`path=${args.path}`);
+                break;
+            case "find":
+                if (args.pattern) keyParams.push(`pattern=${args.pattern}`);
+                if (args.path) keyParams.push(`path=${args.path}`);
+                break;
+            case "ls":
+                if (args.path) keyParams.push(`path=${args.path}`);
+                break;
+            case "bash": {
+                const cmd = args.command || args.cmd || "";
+                const truncated = String(cmd).slice(0, 80);
+                if (truncated) keyParams.push(`command=${truncated}`);
+                break;
+            }
+        }
+        return `call:${toolName}(${keyParams.join(",")})`;
+    }
 
     pi.on("session_start", async (_event, ctx) => {
         // Reset all in-memory state to ensure a clean slate after reload or session replacement.
@@ -358,6 +401,61 @@ export default function (pi: ExtensionAPI) {
         recordToolExecution(event.toolCallId, event.toolName, event.args || {});
     });
 
+    /** Loop-escalation: block repeated tool calls that were part of a detected loop.
+     *  After the nudge fires in turn_end, if the model repeats the same call,
+     *  we forcibly fail it with an escalating message to jolt it out of the pattern. */
+    pi.on("tool_call", (event) => {
+        if (!bannedToolSignatures || !isExecutingMode(OrchestratorState.currentState)) return;
+
+        // Build signature for this call and check against banned set.
+        const sig = _buildSingleSig(event.toolName, event.input || {});
+        if (!sig || !bannedToolSignatures.has(sig)) return;
+
+        consecutiveBlocks++;
+
+        // If the model keeps ignoring blocks after multiple escalation rounds,
+        // send another nudge every 3 blocked attempts.
+        const shouldReNudge = consecutiveBlocks % 3 === 0 && escalationRounds < 5;
+
+        // Phase-specific escalation message.
+        const phaseMsgs: Record<string, string> = {
+            code_review:
+                `BLOCKED (attempt ${consecutiveBlocks}): You already tried this and it didn't help. ` +
+                `You CANNOT edit files directly in CODE_REVIEW mode — you only have read/ls/grep/find. ` +
+                `To fix an issue, create a remediation task with orchestrate_add_task and start it with orchestrate_start_task.`,
+            verifying:
+                `BLOCKED (attempt ${consecutiveBlocks}): You already tried this. ` +
+                `In VERIFICATION mode you should inspect completed work and call orchestrate_approve_goal when satisfied, ` +
+                `or create remediation tasks if something is missing.`,
+        };
+
+        const reason = phaseMsgs[OrchestratorState.currentState] ||
+            `BLOCKED (attempt ${consecutiveBlocks}): This tool call was part of a repetitive loop detected moments ago. Stop repeating the same action and take a different approach.`;
+
+        notifyTuiOnly(
+            pi,
+            `[loop-escalation] Blocked repeated tool '${event.toolName}' — attempt ${consecutiveBlocks} after loop-breaker nudge.`
+        );
+
+        if (shouldReNudge) {
+            escalationRounds++;
+            const reNudgeMessage =
+                `System: You are still repeating the same blocked action. ` +
+                `Your last ${consecutiveBlocks} tool call(s) have been rejected because they match a loop pattern. ` +
+                `You MUST use a different tool or different parameters.`;
+            try {
+                pi.sendMessage(
+                    { customType: "orchestrator_event", content: reNudgeMessage, display: true },
+                    { triggerTurn: true }
+                );
+            } catch (e) {
+                notifyTuiOnly(pi, `Failed to send re-nudge: ${String(e)}`);
+            }
+        }
+
+        return { block: true, reason };
+    });
+
     /** Track orchestrator tool calls per turn for loop detection.
      *  Run at turn_end to detect repetitive identical turns during execution mode. */
     pi.on("turn_end", async (_event, _ctx) => {
@@ -423,6 +521,14 @@ export default function (pi: ExtensionAPI) {
                     );
                     setLoopBreakerFired();
 
+                    // Capture the banned tool signatures so we can block them on next turn.
+                    const banned = buildBannedToolSigs();
+                    if (banned.size > 0) {
+                        bannedToolSignatures = banned;
+                        consecutiveBlocks = 0;
+                        escalationRounds = 0;
+                    }
+
                     // Pick a nudge tailored to the current phase so the model gets actionable direction.
                     const currentState = OrchestratorState.currentState;
                     let loopBreakerMessage: string;
@@ -456,7 +562,10 @@ export default function (pi: ExtensionAPI) {
             } else {
                 setLastTurnSignature(signature);
                 resetConsecutiveCount();
-                // Different turn pattern - reset the one-shot flag so we can detect again
+                // Different turn pattern - model broke out of the loop. Clear bans.
+                bannedToolSignatures = null;
+                consecutiveBlocks = 0;
+                escalationRounds = 0;
                 resetLoopBreakerFlag();
             }
         }

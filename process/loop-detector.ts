@@ -218,13 +218,24 @@ function _orchToolSignature(toolName: string, args: Record<string, unknown>): st
     return `call:${toolName}(${keyParams.join(",")})`;
 }
 
+/** Build the individual tool-call signatures from pending executions.
+ *  Used by loop-escalation to extract banned calls after a loop is detected. */
+function _buildBannedToolSigs(): Set<string> {
+    const parts = new Set<string>();
+    for (const exec of orchestratorLoopDetector._pendingToolExecutions.values()) {
+        const sig = _orchToolSignature(exec.toolName, exec.args);
+        if (sig) parts.add(sig);
+    }
+    return parts;
+}
+
 /**
  * Stateful orchestrator-level loop detector. Tracks per-turn tool-call signatures
  * and fires after a threshold of consecutive identical turns.
  */
 class OrchestratorLoopDetector {
     /** Per-turn tool execution tracker: maps toolCallId → { toolName, args } */
-    private _pendingToolExecutions = new Map<string, { toolName: string; args: Record<string, unknown> }>();
+    _pendingToolExecutions = new Map<string, { toolName: string; args: Record<string, unknown> }>;
 
     /** Previous turn signature for comparison. */
     private _lastTurnSignature: string | null = null;
@@ -393,3 +404,8 @@ export function resetLoopState(): void {
 
 /** Threshold constant exported for index.ts turn_end logic. */
 export { ORCHESTRATOR_LOOP_THRESHOLD };
+
+/** Build individual tool-call signatures from pending executions (for loop-escalation banning). */
+export function buildBannedToolSigs(): Set<string> {
+    return _buildBannedToolSigs();
+}
