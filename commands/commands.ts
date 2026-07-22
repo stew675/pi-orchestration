@@ -103,7 +103,9 @@ function handleResumeReview(pi: ExtensionAPI) {
 function handleResumeCodeReview(pi: ExtensionAPI) {
     // Resuming from code-review phase (reviewing_code).
     // Re-run the code review sub-agent. If it fails again, fall through to normal review.
-    sendResumeMessage(
+    // IMPORTANT: Do NOT wake the orchestrator here — finishPlan() handles waking it
+    // after the sub-agent produces a verdict with proper instructions for the phase.
+    notifyTuiOnly(
         pi,
         `System: Resuming from CODE_REVIEW state. Code review was interrupted — re-running automated code review.`
     );
