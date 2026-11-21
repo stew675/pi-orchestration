@@ -32,3 +32,6 @@ test_results.txt
 
 # Plans and prompts
 plans/
+
+# Host packages of the running Pi install (scripts/link-pi-host.mjs)
+.pi-host

@@ -11,7 +11,8 @@
     "semi": true
   },
   "scripts": {
-    "check": "tsc --noEmit",
+    "link-pi-host": "node scripts/link-pi-host.mjs",
+    "check": "npm run link-pi-host && tsc --noEmit",
     "format": "prettier --write '*.ts'",
     "test": "vitest run",
     "test:watch": "vitest"
