@@ -84,7 +84,9 @@ class OrchestrationEditor extends CustomEditor {
     }
 
     override render(width: number): string[] {
-        const lines = super.render(width);
+        // pi >= 1.6.0: render() returns a readonly view that Container reuses while its
+        // children are unchanged, so the result must be copied before it is edited.
+        const lines = [...super.render(width)];
         if (lines.length < 2) return lines;
 
         const phaseColor = getOrchestrationPhaseColor();
